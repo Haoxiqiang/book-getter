@@ -114,6 +114,21 @@ final class SourceEngineTest {
         assertEquals("https://example.test/one", chapters.get(0).url());
     }
 
+    @Test void duplicateJavascriptChapterPlaceholdersFollowLegadoUrlDeduplication() {
+        Source source = SourceImporter.parse(sourceJson).sources().get(0);
+        String html = "<ul>"
+                + "<li class='chapter'><a href='/one'>One</a></li>"
+                + "<li class='chapter'><a href='javascript:'>Two</a></li>"
+                + "<li class='chapter'><a href='/three'>Three</a></li>"
+                + "<li class='chapter'><a href='javascript:'>Four</a></li></ul>";
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(), html, 200, Map.of()));
+        BookHit hit = new BookHit(source.id(), "https://example.test/book", "Book", "", "", "", Kind.TEXT);
+        List<Chapter> chapters = engine.chapters(source, new BookDetail(hit, hit.url(), List.of()));
+        assertEquals(3, chapters.size());
+        assertEquals(1, chapters.stream().filter(chapter ->
+                ResponseSignals.javascriptPlaceholderUrl(chapter.url())).count());
+    }
+
     @Test void directTextNodesAndAllMatchLegadoDomActions() {
         Source source = SourceImporter.parse(sourceJson).sources().get(0);
         RuleEvaluator rules = new RuleEvaluator(new RhinoRuntime(request ->

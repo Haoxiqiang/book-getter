@@ -162,14 +162,17 @@ public final class LiveSourceProbe {
                             System.out.println(row(source.name(), keyword, suspect ? "DETAIL_SUSPECT" : "DETAIL_OK",
                                     "", detail.hit().name(), detail.tocUrl() + " " + metadataFlags(detail.hit())));
                             List<Chapter> chapters = engine.chapters(source, detail);
-                            long readable = chapters.stream().filter(chapter -> !chapter.volume()).count();
+                            long nonVolume = chapters.stream().filter(chapter -> !chapter.volume()).count();
+                            long jsPlaceholders = chapters.stream().filter(chapter -> !chapter.volume()
+                                    && ResponseSignals.javascriptPlaceholderUrl(chapter.url())).count();
                             long vip = chapters.stream().filter(Chapter::vip).count();
-                            String firstReadableUrl = chapters.stream().filter(chapter -> !chapter.volume())
+                            String firstNonVolumeUrl = chapters.stream().filter(chapter -> !chapter.volume())
                                     .findFirst().map(Chapter::url).orElse("");
                             System.out.println(row(source.name(), keyword, "CATALOG_OK", Integer.toString(chapters.size()), "",
-                                    chapters.isEmpty() ? "" : "readable=" + readable + " vip=" + vip
+                                    chapters.isEmpty() ? "" : "nonVolume=" + nonVolume
+                                            + " javascriptPlaceholders=" + jsPlaceholders + " vip=" + vip
                                             + " firstUrl=" + chapters.get(0).url()
-                                            + " firstReadableUrl=" + firstReadableUrl));
+                                            + " firstNonVolumeUrl=" + firstNonVolumeUrl));
                             if (!chapters.isEmpty() && exportFirst == null && !catalogFirst) {
                                 List<Chapter> readableChapters = chapters.stream().filter(chapter -> !chapter.volume()).toList();
                                 if (readableChapterIndex >= readableChapters.size())

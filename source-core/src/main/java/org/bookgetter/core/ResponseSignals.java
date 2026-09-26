@@ -49,6 +49,11 @@ public final class ResponseSignals {
                 || signal.equals("NON_200_SUCCESS");
     }
 
+    /** Catalog-only diagnostic: a JavaScript link is not a directly fetchable chapter URL. */
+    public static boolean javascriptPlaceholderUrl(String url) {
+        return url != null && url.stripLeading().toLowerCase(Locale.ROOT).startsWith("javascript:");
+    }
+
     public static String quality(FetchResponse response) {
         if (response.status() >= 300 && response.status() < 400) return "UNRESOLVED_REDIRECT";
         if (response.status() == 401 || response.status() == 403) return "ACCESS_DENIED";

@@ -15,6 +15,13 @@ final class ResponseSignalsTest {
         assertEquals(0, ResponseSignals.visibleCharacters(null));
     }
 
+    @Test void javascriptCatalogLinksAreReportedAsPlaceholders() {
+        assertTrue(ResponseSignals.javascriptPlaceholderUrl("javascript:"));
+        assertTrue(ResponseSignals.javascriptPlaceholderUrl("  JavaScript:void(0)"));
+        assertFalse(ResponseSignals.javascriptPlaceholderUrl("https://example.test/chapter/1"));
+        assertFalse(ResponseSignals.javascriptPlaceholderUrl(null));
+    }
+
     @Test void crossHostAndAcceptedResponsesMakeEmptySearchUnverified() {
         FetchRequest request = new FetchRequest("https://old.example/search?q=book");
         FetchResponse migrated = new FetchResponse("https://new.example/", "<html>Home</html>", 200, Map.of());

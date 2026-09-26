@@ -14,8 +14,8 @@
 
 有度书源的 `bookList` 是 `class.ser-ret@tag.li||class.pagebook`，字段规则含 `class.mb5 fs20 f_mbo pt5 ell@tag.a@text||...`。搜索页实际有 `<h3 class="mb5 fs20 f_mbo pt5 ell">`。Legado 的默认 `class.` 路径会调用 jsoup `getElementsByClass`，它接受带空格的多类名；原引擎将它变成 CSS 后代选择器，且字段 `one()` 没有依次回退 `||`，导致所有卡片因书名为空被丢弃。已补最小 Java 回归并按官方路径修复。
 
-复测 `斗破苍穹`：JVM 搜索 POST HTTP 200、15 条；首条《斗破苍穹19·勇闯中域》详情 HTTP 200、目录 107 章、首章一页 600 字符。Android 模拟器同样搜索 15 条、目录 107 章、首章 600 字符。这是来自主集合与 22 源补充集合之外的另一种跨环境正对照，不说明整个 128 源集合可用。
+复测 `斗破苍穹`：JVM 搜索 POST HTTP 200、15 条；首条《斗破苍穹19·勇闯中域》详情 HTTP 200、目录去重后 107 条、首章一页 600 字符。Android 模拟器同样搜索 15 条、目录 107 条、首章 600 字符。后续核对发现这 107 条中有 [1 条 `javascript:` 占位](additional-cross-site-probe.md#有度目录的107-章含义)，不能说 107 章均可抓取。这是来自主集合与 22 源补充集合之外的另一种跨环境正对照，不说明整个 128 源集合可用。
 
 首次 JVM 首章探针错误地调用不带下一章 URL 的简化 `content()`，沿 `nextContentUrl` 连续请求约 50 页并把后续章节并入当前正文，得到错误的 28111 字符。修正后探针传入目录中下一条**非卷**章节的 URL，首章只请求一页。核心简化接口对配置了 `nextContentUrl` 的书源现直接要求显式边界；App、调试探针与批量工具共用“跳过卷标题找下一章”逻辑，批量工具也不再把卷标题当正文下载。此前 28111 字符结果是失败证据，不得计入正文质量或下载成功数。
 
-后续按官方 `BookContent.analyzeContent` 的顺序补上了正文**多页合并后**执行 `ruleContent.replaceRegex`：支持开头 `<js>…</js>` 接后置 `##正则##替换`，并以合成私用区字符 U+E800 验证字体映射脚本能执行。`source-core:test`、`export:test` 与 Android Debug 构建通过。2026-09-27 再测同一有度样本，Android 搜索 POST HTTP 200、15 条，目录 107 章、首章 HTTP 200、处理后 600 字符。首章未必含需映射的私用区字符，故这仍**不能证明**有度完整字体表或所有章节正确；也未下载整书。
+后续按官方 `BookContent.analyzeContent` 的顺序补上了正文**多页合并后**执行 `ruleContent.replaceRegex`：支持开头 `<js>…</js>` 接后置 `##正则##替换`，并以合成私用区字符 U+E800 验证字体映射脚本能执行。`source-core:test`、`export:test` 与 Android Debug 构建通过。2026-09-27 再测同一有度样本，Android 搜索 POST HTTP 200、15 条，目录 107 条（含 1 条占位）、首章 HTTP 200、处理后 600 字符。首章未必含需映射的私用区字符，故这仍**不能证明**有度完整字体表或所有章节正确；也未下载整书。

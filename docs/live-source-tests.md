@@ -119,3 +119,5 @@ XPath 跨站规则复测：AOAOSTAR 128 集合的黑岩阅读公开 API 搜索 2
 主目录 rezero 的目录规则 `isVolume=@js:result.attr('href').endsWith('index.html')` 发现 DOM 节点被字符串化后会在目录失败。受控节点 JS 视图修复后，同一快照/同词在 JVM、Android 均搜索 1、详情及公开目录 910 条通过，其中 23 卷标题、887 普通章节；站点 HTML 的两类链接独立计数相同。只重验到目录、不抓正文或整书；原始源 JSON 哈希与公开单源相同。[专项证据](dom-node-js-probe.md)。
 
 另以经致文学验证 HTTP 200 的页面内容边界：搜索“上门龙婿”返回 1 条，但详情 `/books/609` 是明确“不存在”提示页。修复前伪报详情通过、目录规则失败；现在 JVM/Android 均停在 `DETAIL.ruleBookInfo.init / PAGE_NOT_FOUND`。未得到真实目录，故其 `select/hasClass` 规则尚未验证；无正文及下载。[源哈希、命令和阶段证据](jingzhi-notfound-probe.md)。
+
+再从 128 源集合挑 19 条不同名称书源各搜一次，其中 16 条为此前跨站记录之外的新候选，主要碰到 TLS/EOF、403/404、跨域 301→403 和未完成 302；企鹅听书明确返回 `books=[]/total=0`。有度复测 15 条搜索、详情及目录 107 条，但公开目录的 108 个 HTML 条目里有 2 个同 URL `javascript:` 占位，去重后仍留 1 个，故不称 107 章均可阅读。JVM/Android 探针现均报告占位数；没有新下载。[逐站结果与官方去重依据](additional-cross-site-probe.md)。
