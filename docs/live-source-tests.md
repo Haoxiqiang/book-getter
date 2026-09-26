@@ -58,4 +58,12 @@
 
 进一步加入 `<js>...</js>` 规则以及 `java.put/get` 的源级变量后，`rezero` 源用关键词 `RE0` 搜索返回 1 本，详情成功，目录解析出 887 章，首章正文 1979 字符；尚未抓完整本，因此不计入整书数。可用 `-PprobeSource=re0zero.top -PprobeQueries=RE0 -PprobeCaptureFirst=true` 复测。
 
+批量过程中发现一条伪成功：`しっぱいしたはなし` 的单章缓存只有 `\nnull`，导出 TXT 虽然存在且哈希匹配，却没有真实正文。因此新增正文 `null`/`undefined` 判空与离线独立审计；这条记录不计入 100 本。当前运行中的旧版探针仍可能打印包含它的完成数，必须以 `auditBookDownloads` 的 `valid` 为准。审计只读本地文件，复核不同书 URL、章节缓存数量与正文、TXT 字节数及 SHA-256：
+
+```sh
+./gradlew :source-core:auditBookDownloads -PauditMinimum=100 --offline
+```
+
+本次缺陷也说明：搜索命中、文件存在、哈希一致都只是必要证据，不能单独证明规则解析出了正文。使用的上游 skill 对 `nextContentUrl`（同章分页和下一章）有互相冲突的段落；本工程按官方 `BookContent.analyzeContent` 核对，它提取下一页链接并在命中下一章 URL 时停止，不能盲目把“下一章”链接当作同章内容合并。
+
 针对其他站点的只读连通性检查：哔哩轻小说的 `search_guard=js` 返回 HTTP 403；轻小说文库搜索地址跳转到 `wenku8.net` 后返回 HTTP 403；三七轻小说搜索地址 HTTP 200 但正文仅约 975 字节，为源脚本所针对的防护场景。这些观察说明当前网络环境的访问限制和规则引擎差距需分开处理，不应绕过站点防护或将 403 解释成“无书”。

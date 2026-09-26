@@ -58,6 +58,40 @@ final class SourceEngineTest {
         assertTrue(engine.search(source, "missing", 1).isEmpty());
     }
 
+    @Test void nullLikeChapterIsNotSuccessfulContent() {
+        Source source = SourceImporter.parse(sourceJson).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
+                "<div class='content'>null</div>", 200, Map.of()));
+        BookHit hit = new BookHit(source.id(), "https://example.test/book", "Book", "", "", "", Kind.TEXT);
+        BookDetail book = new BookDetail(hit, hit.url(), List.of());
+        Chapter chapter = new Chapter(hit.url(), "https://example.test/one", "One", 0, false, false);
+        assertEquals(Stage.CONTENT, assertThrows(SourceFailure.class,
+                () -> engine.content(source, book, chapter)).stage);
+        assertTrue(SourceEngine.invalidContent("\nnull "));
+    }
+
+    @Test void contentPaginationStopsAtKnownNextChapter() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","ruleContent":{
+              "content":"div.content@text","nextContentUrl":"a.next@href"}}
+            """).sources().get(0);
+        java.util.List<String> fetched = new java.util.ArrayList<>();
+        SourceEngine engine = new SourceEngine(request -> {
+            fetched.add(request.url());
+            String body = switch (request.url()) {
+                case "https://example.test/one" -> "<div class='content'>first</div><a class='next' href='/one-2'>Next page</a>";
+                case "https://example.test/one-2" -> "<div class='content'>second</div><a class='next' href='/two'>Next chapter</a>";
+                default -> throw new AssertionError("Fetched next chapter as current content: " + request.url());
+            };
+            return new FetchResponse(request.url(), body, 200, Map.of());
+        });
+        BookHit hit = new BookHit(source.id(), "https://example.test/book", "Book", "", "", "", Kind.TEXT);
+        BookDetail book = new BookDetail(hit, hit.url(), List.of());
+        Chapter chapter = new Chapter(hit.url(), "https://example.test/one", "One", 0, false, false);
+        assertEquals("first\nsecond", engine.content(source, book, chapter, "https://example.test/two").text());
+        assertEquals(List.of("https://example.test/one", "https://example.test/one-2"), fetched);
+    }
+
     @Test void directAttributeRuleReadsCurrentListElement() {
         Source source = SourceImporter.parse("""
             {"bookSourceUrl":"https://example.test","searchUrl":"/search",

@@ -223,7 +223,7 @@ public final class MainActivity extends Activity {
         BookDetail book = activeBook;
         report("解析资源中…");
         runAsync(() -> {
-            ChapterContent content = engine.content(source, book, chapter);
+            ChapterContent content = engine.content(source, book, chapter, nextChapterUrl(chapter));
             if (content.resources().isEmpty()) { report("未解析到资源"); return; }
             onCurrentUi(() -> { pendingResources = content.resources(); openResourceDocument(source.kind() == Kind.IMAGE); });
         });
@@ -270,7 +270,7 @@ public final class MainActivity extends Activity {
                 if (Thread.currentThread().isInterrupted()) { report("已取消；成功章节保留在缓存中"); return; }
                 try {
                     ChapterContent content = cache.get(source.id(), chapter);
-                    if (content == null) { content = engine.content(source, book, chapter); cache.put(source.id(), content); }
+                    if (content == null) { content = engine.content(source, book, chapter, nextChapterUrl(chapter)); cache.put(source.id(), content); }
                     captured.add(content);
                 } catch (Exception e) { failures.add(chapter.title() + ": " + e.getMessage()); }
                 report("抓取 " + (captured.size() + failures.size()) + "/" + selected.size() + "；失败 " + failures.size());
@@ -295,6 +295,10 @@ public final class MainActivity extends Activity {
                 report("已下载 " + resources.size() + " 个资源");
             } catch (Exception e) { report("资源下载失败：" + e.getMessage()); }
         });
+    }
+    private String nextChapterUrl(Chapter chapter) {
+        int index = chapters.indexOf(chapter);
+        return index >= 0 && index + 1 < chapters.size() ? chapters.get(index + 1).url() : null;
     }
     @Override protected void onDestroy() { generation.incrementAndGet(); if (task != null) task.cancel(true); io.shutdownNow(); super.onDestroy(); }
 }

@@ -45,3 +45,14 @@ tasks.register('batchDownloadProbe', JavaExec) {
             project.findProperty('batchMaxPages') ?: '10',
             project.findProperty('batchDelayMs') ?: '2000'
 }
+
+tasks.register('auditBookDownloads', JavaExec) {
+    group = 'verification'
+    description = 'Offline independent check of distinct URLs, chapter caches, TXT sizes and SHA-256.'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'org.bookgetter.core.BookDownloadAudit'
+    workingDir = rootProject.projectDir
+    args rootProject.file('downloads/batch/books').absolutePath,
+            project.findProperty('auditSource') ?: 'https://n.novelia.cc/',
+            project.findProperty('auditMinimum') ?: '1'
+}

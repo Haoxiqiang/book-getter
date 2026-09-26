@@ -99,6 +99,11 @@ public final class SourceEngine {
     }
 
     public ChapterContent content(Source source, BookDetail book, Chapter chapter) {
+        return content(source, book, chapter, null);
+    }
+
+    /** Pass the catalog's following chapter URL so pagination cannot absorb that chapter. */
+    public ChapterContent content(Source source, BookDetail book, Chapter chapter, String nextChapterUrl) {
         requireIdentity(source, book.hit().sourceId());
         try {
             String text;
@@ -106,7 +111,7 @@ public final class SourceEngine {
                 Map<String, Object> args = new LinkedHashMap<>();
                 args.put("chapter", Map.of("url", chapter.url(), "title", chapter.title(), "index", chapter.index()));
                 args.put("book", jsBook(book));
-                args.put("nextChapterUrl", null);
+                args.put("nextChapterUrl", nextChapterUrl);
                 text = String.valueOf(scripts.call(source.string("mainJs"), "getContent", args, source));
             }
             else {
@@ -116,13 +121,15 @@ public final class SourceEngine {
                 while (page != null && !page.isBlank() && visited.add(page) && visited.size() <= 50) {
                     FetchResponse response = fetch(requests.plan(page, source, "", 1, book.tocUrl()));
                     String value = field(source, "ruleContent", "content", response.body(), response.url(), false);
+                    if (invalidContent(value)) throw new SourceFailure(Stage.CONTENT, source.id(), "ruleContent.content", "Empty page content");
                     if (joined.length() > 0) joined.append('\n');
                     joined.append(value);
-                    page = field(source, "ruleContent", "nextContentUrl", response.body(), response.url(), true);
+                    String following = field(source, "ruleContent", "nextContentUrl", response.body(), response.url(), true);
+                    page = following.equals(nextChapterUrl) ? "" : following;
                 }
                 text = joined.toString();
             }
-            if (text.isBlank() || text.equals("null")) throw new SourceFailure(Stage.CONTENT, source.id(), "ruleContent.content", "Empty chapter content");
+            if (invalidContent(text)) throw new SourceFailure(Stage.CONTENT, source.id(), "ruleContent.content", "Empty chapter content");
             if (source.kind() == Kind.TEXT) return new ChapterContent(chapter, Kind.TEXT, text, List.of());
             List<Resource> resources = new ArrayList<>();
             if (source.kind() == Kind.IMAGE) {
@@ -179,6 +186,11 @@ public final class SourceEngine {
     }
 
     private static String orDefault(String value, String fallback) { return value.isBlank() ? fallback : value; }
+    static boolean invalidContent(String text) {
+        if (text == null) return true;
+        String value = text.trim();
+        return value.isEmpty() || value.equalsIgnoreCase("null") || value.equalsIgnoreCase("undefined");
+    }
     private static String absoluteIfPresent(String base, String value) {
         return value.isBlank() ? "" : RuleEvaluator.absolute(base, value);
     }

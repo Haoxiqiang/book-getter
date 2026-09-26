@@ -88,16 +88,19 @@ public final class BatchDownloadProbe {
                     }
                     Files.createDirectories(bookDirectory.resolve("chapters"));
                     List<ChapterContent> contents = new ArrayList<>();
-                    for (Chapter chapter : chapters) {
+                    for (int chapterIndex = 0; chapterIndex < chapters.size(); chapterIndex++) {
+                        Chapter chapter = chapters.get(chapterIndex);
+                        String nextChapterUrl = chapterIndex + 1 < chapters.size() ? chapters.get(chapterIndex + 1).url() : null;
                         Path chapterFile = bookDirectory.resolve("chapters")
                                 .resolve(chapter.index() + "-" + sha256(chapter.url().getBytes(StandardCharsets.UTF_8)) + ".txt");
                         String text;
-                        if (Files.isRegularFile(chapterFile) && Files.size(chapterFile) > 0) {
+                        if (Files.isRegularFile(chapterFile) && Files.size(chapterFile) > 0
+                                && !SourceEngine.invalidContent(Files.readString(chapterFile))) {
                             text = Files.readString(chapterFile);
                         } else {
-                            ChapterContent content = engine.content(source, detail, chapter);
+                            ChapterContent content = engine.content(source, detail, chapter, nextChapterUrl);
                             text = content.text();
-                            if (text == null || text.isBlank()) throw new IllegalStateException("Blank chapter: " + chapter.url());
+                            if (SourceEngine.invalidContent(text)) throw new IllegalStateException("Blank chapter: " + chapter.url());
                             Path temporary = chapterFile.resolveSibling(chapterFile.getFileName() + ".part");
                             Files.writeString(temporary, text);
                             Files.move(temporary, chapterFile, StandardCopyOption.REPLACE_EXISTING);
@@ -161,7 +164,8 @@ public final class BatchDownloadProbe {
             try (var files = Files.list(chapters)) {
                 List<Path> chapterFiles = files.filter(path -> path.getFileName().toString().endsWith(".txt")).toList();
                 if (chapterFiles.size() != chapterCount) return false;
-                for (Path chapterFile : chapterFiles) if (Files.size(chapterFile) == 0) return false;
+                for (Path chapterFile : chapterFiles)
+                    if (Files.size(chapterFile) == 0 || SourceEngine.invalidContent(Files.readString(chapterFile))) return false;
             }
             return sourceId.equals(manifest.get("sourceId").getAsString())
                     && chapterCount > 0
