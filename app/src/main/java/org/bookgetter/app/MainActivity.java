@@ -219,6 +219,7 @@ public final class MainActivity extends Activity {
         if (chosen < 0 && !chapters.isEmpty()) chosen = 0;
         if (chosen < 0) { report("没有章节"); return; }
         Chapter chapter = chapters.get(chosen);
+        if (chapter.volume()) { report("卷标题不是可读取章节"); return; }
         Source source = activeSource;
         BookDetail book = activeBook;
         report("解析资源中…");
@@ -261,6 +262,8 @@ public final class MainActivity extends Activity {
         List<Chapter> selected = new ArrayList<>();
         for (int i = 0; i < chapters.size(); i++) if (list.isItemChecked(i)) selected.add(chapters.get(i));
         if (selected.isEmpty()) selected.addAll(chapters);
+        selected.removeIf(Chapter::volume);
+        if (selected.isEmpty()) { report("没有可读取章节"); return; }
         Source source = activeSource; BookDetail book = activeBook;
         report("抓取 0/" + selected.size());
         runAsync(() -> {
@@ -297,8 +300,7 @@ public final class MainActivity extends Activity {
         });
     }
     private String nextChapterUrl(Chapter chapter) {
-        int index = chapters.indexOf(chapter);
-        return index >= 0 && index + 1 < chapters.size() ? chapters.get(index + 1).url() : null;
+        return SourceEngine.nextReadableUrl(chapters, chapter);
     }
     @Override protected void onDestroy() { generation.incrementAndGet(); if (task != null) task.cancel(true); io.shutdownNow(); super.onDestroy(); }
 }

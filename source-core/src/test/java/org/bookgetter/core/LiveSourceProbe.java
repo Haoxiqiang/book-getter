@@ -117,8 +117,9 @@ public final class LiveSourceProbe {
                             List<Chapter> chapters = engine.chapters(source, detail);
                             System.out.println(row(source.name(), keyword, "CATALOG_OK", Integer.toString(chapters.size()), "", ""));
                             if (!chapters.isEmpty() && exportFirst == null) {
-                                var content = engine.content(source, detail, chapters.stream()
-                                        .filter(chapter -> !chapter.volume()).findFirst().orElseThrow());
+                                Chapter firstChapter = chapters.stream().filter(chapter -> !chapter.volume()).findFirst().orElseThrow();
+                                var content = engine.content(source, detail, firstChapter,
+                                        SourceEngine.nextReadableUrl(chapters, firstChapter));
                                 System.out.println(row(source.name(), keyword, "CONTENT_OK", "", "",
                                         "characters=" + (content.text() == null ? 0 : content.text().length())));
                             }
@@ -126,7 +127,8 @@ public final class LiveSourceProbe {
                                 var contents = new ArrayList<org.bookgetter.core.Models.ChapterContent>();
                                 for (Chapter chapter : chapters) {
                                     if (chapter.volume()) continue;
-                                    contents.add(engine.content(source, detail, chapter));
+                                    contents.add(engine.content(source, detail, chapter,
+                                            SourceEngine.nextReadableUrl(chapters, chapter)));
                                     Thread.sleep(1500);
                                 }
                                 Files.createDirectories(exportFirst.toAbsolutePath().getParent());

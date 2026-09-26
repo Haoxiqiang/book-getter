@@ -88,8 +88,20 @@ final class SourceEngineTest {
         BookHit hit = new BookHit(source.id(), "https://example.test/book", "Book", "", "", "", Kind.TEXT);
         BookDetail book = new BookDetail(hit, hit.url(), List.of());
         Chapter chapter = new Chapter(hit.url(), "https://example.test/one", "One", 0, false, false);
+        SourceFailure missingBoundary = assertThrows(SourceFailure.class,
+                () -> engine.content(source, book, chapter));
+        assertEquals("ruleContent.nextContentUrl", missingBoundary.field);
         assertEquals("first\nsecond", engine.content(source, book, chapter, "https://example.test/two").text());
         assertEquals(List.of("https://example.test/one", "https://example.test/one-2"), fetched);
+    }
+
+    @Test void nextReadableChapterSkipsVolumeHeadings() {
+        Chapter first = new Chapter("book", "https://example.test/one", "One", 0, false, false);
+        Chapter volume = new Chapter("book", "Volume 2", "Volume 2", 1, true, false);
+        Chapter second = new Chapter("book", "https://example.test/two", "Two", 2, false, false);
+        List<Chapter> chapters = List.of(first, volume, second);
+        assertEquals(second.url(), SourceEngine.nextReadableUrl(chapters, first));
+        assertNull(SourceEngine.nextReadableUrl(chapters, second));
     }
 
     @Test void directAttributeRuleReadsCurrentListElement() {
@@ -149,6 +161,21 @@ final class SourceEngineTest {
         assertEquals("https://novel.example/b/229093.html", hit.url());
     }
 
+    @Test void defaultMultiClassSelectorUsesJsoupClassNameSemantics() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://novel.example","searchUrl":"/sa",
+             "ruleSearch":{"bookList":"class.ser-ret@tag.li",
+               "name":"class.missing@text||class.mb5 fs20 f_mbo pt5 ell@tag.a@text",
+               "bookUrl":"class.mb5 fs20 f_mbo pt5 ell@tag.a@href"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
+                "<ul class='ser-ret'><li><h3 class='mb5 fs20 f_mbo pt5 ell'>"
+                        + "<a href='/book/17551/'>斗破苍穹</a></h3></li></ul>", 200, Map.of()));
+        BookHit hit = engine.search(source, "斗破苍穹", 1).get(0);
+        assertEquals("斗破苍穹", hit.name());
+        assertEquals("https://novel.example/book/17551/", hit.url());
+    }
+
     @Test void javaAjaxUsesLegadoRequestOptionsInsteadOfLiteralUrl() {
         Source source = SourceImporter.parse("""
             {"bookSourceUrl":"https://novel.example"}
@@ -164,6 +191,16 @@ final class SourceEngineTest {
         assertEquals("https://novel.example/search", observed.get().url());
         assertEquals("POST", observed.get().method());
         assertEquals("keyword=book", observed.get().body());
+    }
+
+    @Test void signedUrlHostUsesUtf8Base64AndLowercaseMd5() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://signed.example","searchUrl":"/search?token={{java.md5Encode(java.base64Encode('abc'))}}"}
+            """).sources().get(0);
+        FetchRequest request = new RequestPlanner(new RhinoRuntime(unused ->
+                new FetchResponse(unused.url(), "", 200, Map.of())))
+                .plan(source.string("searchUrl"), source, "book", 1, source.id());
+        assertEquals("https://signed.example/search?token=f4c0128178a6a21b7a3dd76729725d91", request.url());
     }
 
     @Test void requestOptionFollowedByJsKeepsUrlAndOptions() {

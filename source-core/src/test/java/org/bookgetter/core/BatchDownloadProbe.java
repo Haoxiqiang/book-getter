@@ -82,15 +82,17 @@ public final class BatchDownloadProbe {
                     BookDetail detail = engine.detail(source, hit);
                     List<Chapter> chapters = engine.chapters(source, detail).stream()
                             .filter(chapter -> !chapter.volume()).toList();
-                    if (chapters.isEmpty() || chapters.size() > maxChapters) {
-                        System.out.println("SKIP\t" + hit.url() + "\tchapters=" + chapters.size());
+                    long readableCount = chapters.stream().filter(chapter -> !chapter.volume()).count();
+                    if (readableCount == 0 || readableCount > maxChapters) {
+                        System.out.println("SKIP\t" + hit.url() + "\treadableChapters=" + readableCount);
                         continue;
                     }
                     Files.createDirectories(bookDirectory.resolve("chapters"));
                     List<ChapterContent> contents = new ArrayList<>();
                     for (int chapterIndex = 0; chapterIndex < chapters.size(); chapterIndex++) {
                         Chapter chapter = chapters.get(chapterIndex);
-                        String nextChapterUrl = chapterIndex + 1 < chapters.size() ? chapters.get(chapterIndex + 1).url() : null;
+                        if (chapter.volume()) continue;
+                        String nextChapterUrl = SourceEngine.nextReadableUrl(chapters, chapter);
                         Path chapterFile = bookDirectory.resolve("chapters")
                                 .resolve(chapter.index() + "-" + sha256(chapter.url().getBytes(StandardCharsets.UTF_8)) + ".txt");
                         String text;

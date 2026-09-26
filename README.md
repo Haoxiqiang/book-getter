@@ -21,4 +21,4 @@
 
 验证命令：`./gradlew :source-core:test :export:test :app:assembleDebug`。核心测试使用本地构造的页面；另有 [模拟器闭环记录](docs/verification.md) 和 [本地测试站点](test-fixtures/README.md)，均不依赖真实第三方网站。文档：[架构](docs/architecture.md) · [能力矩阵](docs/compatibility.md) · [资料与案例](docs/references.md)。
 
-上游书源的本地更新、快照和去重由[书源管理目录](source-catalog/README.md)负责；真实书源的五个代表性搜索词见[在线实测](docs/live-source-tests.md)，主集合 11 源逐阶段缺口见[跨站兼容诊断](docs/cross-source-compatibility.md)，另有不并入主目录的[22 源补充探针](docs/supplemental-source-probe.md)。原始书源快照只保存在本机，不纳入版本控制。
+上游书源的本地更新、快照和去重由[书源管理目录](source-catalog/README.md)负责；真实书源的五个代表性搜索词见[在线实测](docs/live-source-tests.md)，主集合 11 源逐阶段缺口见[跨站兼容诊断](docs/cross-source-compatibility.md)，另有不并入主目录的[22 源补充探针](docs/supplemental-source-probe.md)和[POST/翻页边界探针](docs/post-and-pagination-probe.md)。原始书源快照只保存在本机，不纳入版本控制。

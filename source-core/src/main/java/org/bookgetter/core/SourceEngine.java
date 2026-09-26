@@ -110,7 +110,20 @@ public final class SourceEngine {
     }
 
     public ChapterContent content(Source source, BookDetail book, Chapter chapter) {
+        String pagination = source.rule("ruleContent", "nextContentUrl");
+        if (!source.isJsSource() && pagination != null && !pagination.isBlank())
+            throw new SourceFailure(Stage.CONTENT, source.id(), "ruleContent.nextContentUrl",
+                    "Content pagination requires the following chapter boundary; use content(source, book, chapter, nextChapterUrl)");
         return content(source, book, chapter, null);
+    }
+
+    /** The next real chapter is the pagination boundary; volume headings are not content pages. */
+    public static String nextReadableUrl(List<Chapter> chapters, Chapter current) {
+        int index = chapters.indexOf(current);
+        if (index < 0) return null;
+        for (int next = index + 1; next < chapters.size(); next++)
+            if (!chapters.get(next).volume()) return chapters.get(next).url();
+        return null;
     }
 
     /** Pass the catalog's following chapter URL so pagination cannot absorb that chapter. */

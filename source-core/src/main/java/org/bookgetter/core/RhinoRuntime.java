@@ -1,9 +1,12 @@
 package org.bookgetter.core;
 
 import com.google.gson.Gson;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import org.bookgetter.core.Models.*;
@@ -75,6 +78,27 @@ public final class RhinoRuntime implements ScriptRuntime {
                     Object input = args.length > 1 && args[1] != Undefined.instance
                             ? Context.toString(args[1]) : ruleContent[0];
                     return hostRules.one(rule, input, ruleBaseUrl, source, false);
+                }
+            });
+            ScriptableObject.putProperty(java, "base64Encode", new BaseFunction() {
+                @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
+                    String value = args.length == 0 ? "" : Context.toString(args[0]);
+                    return Base64.getEncoder().encodeToString(value.getBytes(StandardCharsets.UTF_8));
+                }
+            });
+            ScriptableObject.putProperty(java, "md5Encode", new BaseFunction() {
+                @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
+                    String value = args.length == 0 ? "" : Context.toString(args[0]);
+                    try {
+                        byte[] digest = MessageDigest.getInstance("MD5").digest(value.getBytes(StandardCharsets.UTF_8));
+                        char[] hex = "0123456789abcdef".toCharArray();
+                        char[] result = new char[digest.length * 2];
+                        for (int i = 0; i < digest.length; i++) {
+                            result[i * 2] = hex[(digest[i] >>> 4) & 15];
+                            result[i * 2 + 1] = hex[digest[i] & 15];
+                        }
+                        return new String(result);
+                    } catch (Exception error) { throw Context.throwAsScriptRuntimeEx(error); }
                 }
             });
             ScriptableObject.putProperty(java, "ajax", new BaseFunction() {

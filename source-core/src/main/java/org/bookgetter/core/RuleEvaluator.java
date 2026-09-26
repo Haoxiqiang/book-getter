@@ -111,6 +111,13 @@ public final class RuleEvaluator {
             String text = expandTemplate(value, input, baseUrl, source).trim();
             return url && !text.isBlank() ? absolute(baseUrl, text) : text;
         }
+        if (value.contains("||")) {
+            for (String alternative : value.split("\\|\\|")) {
+                String found = one(alternative.trim(), input, baseUrl, source, url);
+                if (!found.isBlank()) return found;
+            }
+            return "";
+        }
         String[] regex = value.split("##", -1);
         value = regex[0];
         // Legado field rules may address the current list item directly, without a selector.
@@ -242,6 +249,8 @@ public final class RuleEvaluator {
 
     private static List<Object> select(Object input, String selector, String baseUrl) {
         Element element = input instanceof Element e ? e : Jsoup.parse(input.toString(), baseUrl);
+        if (selector.startsWith("class.") && selector.substring(6).contains(" "))
+            return new ArrayList<>(element.getElementsByClass(selector.substring(6)));
         String normalized = normalizeSelector(selector);
         return normalized.isBlank() ? List.of() : new ArrayList<>(element.select(normalized));
     }

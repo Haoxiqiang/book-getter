@@ -78,7 +78,7 @@ public final class CompatibilityProbeActivity extends Activity {
                     Chapter first = chapters.stream().filter(chapter -> !chapter.volume()).findFirst().orElse(null);
                     if (first != null) {
                         var content = engine.content(source, detail, first,
-                                chapters.size() > first.index() + 1 ? chapters.get(first.index() + 1).url() : null);
+                                SourceEngine.nextReadableUrl(chapters, first));
                         Log.i(TAG, clean("CONTENT_OK characters=" + (content.text() == null ? 0 : content.text().length())
                                 + " resources=" + content.resources().size()));
                     }
