@@ -7,6 +7,45 @@ import org.bookgetter.core.Models.*;
 import org.junit.jupiter.api.Test;
 
 final class SourceEngineTest {
+    @Test void relativeSearchUrlResolvesAgainstSourceIdWithFragmentLabel() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"http://example.test#grid tr!0#label",
+             "searchUrl":"/modules/article/search.php,{\\"method\\":\\"POST\\",\\"body\\":\\"searchkey={{key}}\\"}"}
+            """).sources().get(0);
+        FetchRequest request = new RequestPlanner(new RhinoRuntime(ignored ->
+                new FetchResponse("http://example.test", "", 200, Map.of())))
+                .plan(source.string("searchUrl"), source, "斗破苍穹", 1, source.id());
+        assertEquals("http://example.test/modules/article/search.php", request.url());
+        assertEquals("POST", request.method());
+    }
+
+    @Test void listPrefixesAreHandledBeforeRuleEvaluation() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","searchUrl":"/search",
+             "ruleSearch":{"bookList":"+li.book","name":"a@text","bookUrl":"a@href"},
+             "ruleToc":{"chapterList":"+@js:[{k:'One',v:'/one'},{k:'Two',v:'/two'}]",
+                        "chapterName":"k","chapterUrl":"v"}}
+            """).sources().get(0);
+        Transport transport = request -> new FetchResponse(request.url(),
+                "<li class='book'><a href='/book'>Book</a></li>", 200, Map.of());
+        SourceEngine engine = new SourceEngine(transport);
+        assertEquals(1, engine.search(source, "Book", 1).size());
+        BookHit hit = new BookHit(source.id(), "https://example.test/book", "Book", "", "", "", Kind.TEXT);
+        List<Chapter> chapters = engine.chapters(source,
+                new BookDetail(hit, "https://example.test/toc", List.of()));
+        assertEquals(List.of("One", "Two"), chapters.stream().map(Chapter::title).toList());
+        Source reversed = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","ruleToc":{
+             "chapterList":"-li.chapter","chapterName":"a@text","chapterUrl":"a@href"}}
+            """).sources().get(0);
+        SourceEngine reverseEngine = new SourceEngine(request -> new FetchResponse(request.url(),
+                "<li class='chapter'><a href='/one'>One</a></li>"
+                + "<li class='chapter'><a href='/two'>Two</a></li>", 200, Map.of()));
+        assertEquals(List.of("Two", "One"), reverseEngine.chapters(reversed,
+                new BookDetail(hit, "https://example.test/toc", List.of()))
+                .stream().map(Chapter::title).toList());
+    }
+
     @Test void searchListSupportsSelectorJsSelectorChain() {
         Source source = SourceImporter.parse("""
             {"bookSourceUrl":"https://example.test","searchUrl":"/search?q={{key}}",

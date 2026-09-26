@@ -43,3 +43,5 @@
 [`java.getElement/getElements` 节点专项](dom-host-getelement-probe.md)纠正了把 HTML 节点在脚本入口变成字符串数组的宿主差异；受控节点方法及返回节点进入搜索字段的路径已由合成 Java 与 Android 本地夹具验证。主书源三七轻小说本轮仍停在 HTTP 302，复杂 Cookie/AES 与其他返回模式没有实站正对照，保持部分兼容。
 
 [选择器→JS→选择器专项](selector-js-selector-probe.md)补了列表规则的跨行分段执行及受控 `java.getElements(...).toArray()`；“文学吧”从 CSS 解析错误、再到缺少 `toArray`，最后以“故事”返回 13 条候选。仅验证搜索列表路径，候选相关性和下游阶段未验；其他混合模式仍不能据此宣称兼容。
+
+[书源 ID 片段与列表前缀专项](source-id-fragment-and-list-prefix-probe.md)按官方 URL 相对解析和列表入口处理修正了两类独立差异：带空格/中文 `#` 标签的书源 ID 不再使相对搜索路径丢失协议，`+` 列表前缀不再送入 CSS，`-` 列表前缀按官方倒序。八一中文在修正后仍于请求阶段 EOF，笔趣阁③为 403；SF 轻小说真实搜索 2、详情通过、目录 2023，与公开 HTML 独立链接计数相同。只到目录，不计正文或整书。

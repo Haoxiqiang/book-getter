@@ -35,6 +35,19 @@ public final class SourceEngine {
         requests = new RequestPlanner(scripts); rules = new RuleEvaluator(scripts);
     }
 
+    /** Legado strips list-control prefixes before sending the rule to AnalyzeRule. */
+    private List<Object> listItems(String rule, Object input, String baseUrl, Source source) {
+        if (rule == null || rule.isEmpty()) return List.of();
+        boolean reverse = rule.startsWith("-");
+        String selector = reverse ? rule.substring(1) : rule;
+        if (selector.startsWith("+")) selector = selector.substring(1);
+        List<Object> items = rules.many(selector, input, baseUrl, source);
+        if (!reverse) return items;
+        List<Object> ordered = new ArrayList<>(items);
+        java.util.Collections.reverse(ordered);
+        return ordered;
+    }
+
     public List<BookHit> search(Source source, String keyword, int page) {
         try {
             if (source.isJsSource()) return jsSearch(source, keyword, page);
@@ -57,7 +70,7 @@ public final class SourceEngine {
                 }
             }
             String listRule = source.rule("ruleSearch", "bookList");
-            List<Object> items = rules.many(listRule, response.body(), response.url(), source);
+            List<Object> items = listItems(listRule, response.body(), response.url(), source);
             if (items.isEmpty() && (bookUrlPattern == null || bookUrlPattern.isEmpty())) {
                 diagnostics.accept(new Diagnostic(Stage.SEARCH, "DIRECT_DETAIL_EMPTY_LIST",
                         "Search list is empty and no bookUrlPattern is set; trying detail rules",
@@ -168,7 +181,7 @@ public final class SourceEngine {
             String page = book.tocUrl();
             while (page != null && !page.isBlank() && visited.add(page) && visited.size() <= 50) {
                 FetchResponse response = fetch(requests.plan(page, source, "", 1, book.hit().url()));
-                for (Object item : rules.many(source.rule("ruleToc", "chapterList"), response.body(), response.url(), source)) {
+                for (Object item : listItems(source.rule("ruleToc", "chapterList"), response.body(), response.url(), source)) {
                     String title = field(source, "ruleToc", "chapterName", item, response.url(), false);
                     String url = field(source, "ruleToc", "chapterUrl", item, response.url(), true);
                     if (title.isBlank()) continue;

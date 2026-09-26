@@ -557,6 +557,13 @@ public final class RuleEvaluator {
             String resolved = URI.create(base).resolve(raw).toString();
             return optionAt < 0 ? resolved : resolved + path.substring(optionAt);
         }
-        catch (Exception ignored) { return path; }
+        catch (Exception ignored) {
+            // Legado uses java.net.URL for relative links. URL accepts source IDs with
+            // descriptive fragment labels that URI rejects (for example "#grid tr!0").
+            try {
+                String resolved = new java.net.URL(new java.net.URL(base), raw).toString();
+                return optionAt < 0 ? resolved : resolved + path.substring(optionAt);
+            } catch (Exception invalidBase) { return path; }
+        }
     }
 }
