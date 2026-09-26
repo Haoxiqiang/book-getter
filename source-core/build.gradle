@@ -12,11 +12,15 @@ test { useJUnitPlatform() }
 
 tasks.register('liveSourceProbe', JavaExec) {
     group = 'verification'
-    description = 'Opt-in, rate-limited live search probe of the source-j-legado sources.'
+    description = 'Opt-in, rate-limited live search probe of the primary or supplemental source JSON.'
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'org.bookgetter.core.LiveSourceProbe'
     workingDir = rootProject.projectDir
-    args '--catalog', rootProject.file('source-catalog').absolutePath
+    if (project.hasProperty('probeJsonUrl')) {
+        args '--json-url', project.property('probeJsonUrl').toString()
+    } else {
+        args '--catalog', rootProject.file('source-catalog').absolutePath
+    }
     if (project.hasProperty('probeSource')) {
         args '--source', project.property('probeSource').toString()
     }

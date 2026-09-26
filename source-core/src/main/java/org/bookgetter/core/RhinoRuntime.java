@@ -80,7 +80,7 @@ public final class RhinoRuntime implements ScriptRuntime {
             ScriptableObject.putProperty(java, "ajax", new BaseFunction() {
                 @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
                     String url = args.length == 0 ? "" : Context.toString(args[0]);
-                    try { return transport.fetch(new FetchRequest(RuleEvaluator.absolute(source == null ? "" : source.id(), url))).body(); }
+                    try { return transport.fetch(nestedRequest(url, bindings, source)).body(); }
                     catch (Exception e) { throw Context.throwAsScriptRuntimeEx(e); }
                 }
             });
@@ -99,7 +99,7 @@ public final class RhinoRuntime implements ScriptRuntime {
                     if (args.length < 2 && !url.startsWith("http://") && !url.startsWith("https://"))
                         return sourceVariables.getOrDefault(source == null ? "" : source.id(), Map.of()).getOrDefault(url, "");
                     try {
-                        FetchResponse response = transport.fetch(new FetchRequest(RuleEvaluator.absolute(source == null ? "" : source.id(), url)));
+                        FetchResponse response = transport.fetch(nestedRequest(url, bindings, source));
                         Scriptable result = context.newObject(scope);
                         ScriptableObject.putProperty(result, "body", new BaseFunction() {
                             @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
@@ -159,6 +159,14 @@ public final class RhinoRuntime implements ScriptRuntime {
                 return "";
             }
         };
+    }
+
+    private FetchRequest nestedRequest(String url, Map<String, Object> bindings, Source source) {
+        if (source == null) return new FetchRequest(url);
+        String key = String.valueOf(bindings.getOrDefault("key", ""));
+        Object pageValue = bindings.getOrDefault("page", 1);
+        int page = pageValue instanceof Number number ? number.intValue() : Integer.parseInt(pageValue.toString());
+        return new RequestPlanner(this).plan(url, source, key, page, source.id());
     }
 
     private void bind(Context cx, Scriptable scope, String name, Object value) {

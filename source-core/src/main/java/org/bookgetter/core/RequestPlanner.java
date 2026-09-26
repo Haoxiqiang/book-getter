@@ -67,12 +67,40 @@ public final class RequestPlanner {
             catch (Exception ignored) { /* preflight/runtime will show request failure if required */ }
         }
         if (options != null && options.has("headers")) options.getAsJsonObject("headers").entrySet().forEach(e -> headers.put(e.getKey(), e.getValue().getAsString()));
+        String method = option(options, "method", "GET").toUpperCase();
+        String body = option(options, "body", null);
+        String charsetName = option(options, "charset", null);
+        if (method.equals("POST") && body != null && !body.isBlank()
+                && headers.keySet().stream().noneMatch(name -> name.equalsIgnoreCase("Content-Type"))
+                && !body.stripLeading().startsWith("{") && !body.stripLeading().startsWith("[")
+                && !body.stripLeading().startsWith("<")) {
+            Charset formCharset = charsetName == null ? StandardCharsets.UTF_8 : Charset.forName(charsetName);
+            body = encodeForm(body, formCharset);
+            headers.put("Content-Type", "application/x-www-form-urlencoded; charset=" + formCharset.name());
+        }
         long webViewDelay = 0;
         if (options != null && options.has("webViewDelayTime"))
             webViewDelay = Math.max(0, options.get("webViewDelayTime").getAsLong());
-        return new FetchRequest(RuleEvaluator.absolute(base, rawUrl), option(options, "method", "GET").toUpperCase(), headers,
-                option(options, "body", null), option(options, "charset", null),
+        return new FetchRequest(RuleEvaluator.absolute(base, rawUrl), method, headers,
+                body, charsetName,
                 options != null && options.has("webView") && options.get("webView").getAsBoolean(), webViewDelay);
+    }
+
+    private static String encodeForm(String body, Charset charset) {
+        StringBuilder result = new StringBuilder();
+        for (String field : body.split("&", -1)) {
+            if (result.length() > 0) result.append('&');
+            int equal = field.indexOf('=');
+            if (equal < 0) result.append(encodeValue(field, charset));
+            else result.append(encodeValue(field.substring(0, equal), charset))
+                    .append('=').append(encodeValue(field.substring(equal + 1), charset));
+        }
+        return result.toString();
+    }
+
+    private static String encodeValue(String value, Charset charset) {
+        if (value.matches("(?i).*(?:%[0-9a-f]{2}).*")) return value;
+        return URLEncoder.encode(value, charset);
     }
 
     private static String option(JsonObject object, String key, String fallback) {

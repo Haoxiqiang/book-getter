@@ -135,6 +135,37 @@ final class SourceEngineTest {
         assertEquals("https://novel.example/two", hits.get(1).url());
     }
 
+    @Test void inlineAttributeThenJsRuleFindsLiveStyleBookUrl() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://novel.example","searchUrl":"/search",
+             "ruleSearch":{"bookList":".v-list-item","name":".v-title@text",
+               "bookUrl":"@onclick@js:result.match(/'(.*?)'/)[1]"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
+                "<div class='v-list-item' onclick=\"newWebView('/b/229093.html', '', '')\">"
+                        + "<div class='v-title'>灵破苍穹</div></div>", 200, Map.of()));
+        BookHit hit = engine.search(source, "苍穹", 1).get(0);
+        assertEquals("灵破苍穹", hit.name());
+        assertEquals("https://novel.example/b/229093.html", hit.url());
+    }
+
+    @Test void javaAjaxUsesLegadoRequestOptionsInsteadOfLiteralUrl() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://novel.example"}
+            """).sources().get(0);
+        java.util.concurrent.atomic.AtomicReference<FetchRequest> observed = new java.util.concurrent.atomic.AtomicReference<>();
+        RhinoRuntime runtime = new RhinoRuntime(request -> {
+            observed.set(request);
+            return new FetchResponse(request.url(), "response", 200, Map.of());
+        });
+        Object value = runtime.evaluate("java.ajax(\"/search,{\\\"method\\\":\\\"POST\\\",\\\"body\\\":\\\"keyword={{key}}\\\"}\")",
+                Map.of("key", "book", "page", 1), source);
+        assertEquals("response", value);
+        assertEquals("https://novel.example/search", observed.get().url());
+        assertEquals("POST", observed.get().method());
+        assertEquals("keyword=book", observed.get().body());
+    }
+
     @Test void requestOptionFollowedByJsKeepsUrlAndOptions() {
         Source source = SourceImporter.parse("""
             {"bookSourceUrl":"https://example.test","searchUrl":"/search?key={{key}},{\\n  \\"charset\\": \\"gbk\\"\\n}\\n@js:result"}
@@ -158,6 +189,19 @@ final class SourceEngineTest {
                 .plan(source.string("searchUrl"), source, "book", 1, source.id());
         assertTrue(request.webView());
         assertEquals(2500, request.webViewDelayMillis());
+    }
+
+    @Test void postFormUsesConfiguredCharsetAndPreservesSeparators() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://novel.example","searchUrl":"/search,{\\\"method\\\":\\\"POST\\\",\\\"charset\\\":\\\"GBK\\\",\\\"body\\\":\\\"keyword={{key}}&page={{page}}\\\"}"}
+            """).sources().get(0);
+        FetchRequest request = new RequestPlanner(new RhinoRuntime(unused ->
+                new FetchResponse(unused.url(), "", 200, Map.of())))
+                .plan(source.string("searchUrl"), source, "斗破苍穹", 2, source.id());
+        assertEquals("POST", request.method());
+        assertEquals("keyword=" + java.net.URLEncoder.encode("斗破苍穹", java.nio.charset.Charset.forName("GBK"))
+                + "&page=2", request.body());
+        assertTrue(request.headers().get("Content-Type").startsWith("application/x-www-form-urlencoded"));
     }
 
     @Test void requestPlanningFailureIsAttributedToSearchUrl() {

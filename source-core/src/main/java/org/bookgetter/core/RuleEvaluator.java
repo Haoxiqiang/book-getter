@@ -30,7 +30,7 @@ public final class RuleEvaluator {
             return normalizeScript(script.evaluate(value.substring(4, value.length() - 5),
                     Map.of("result", scriptInput(input), "baseUrl", baseUrl), source));
         int chainedJs = value.indexOf("\n@js:");
-        if (chainedJs >= 0) {
+        if (chainedJs > 0) {
             List<Object> initial = many(value.substring(0, chainedJs), input, baseUrl, source);
             return normalize(script.evaluate(value.substring(chainedJs + 5), Map.of("result", initial.stream().map(Object::toString).toList(), "baseUrl", baseUrl), source));
         }
@@ -94,10 +94,10 @@ public final class RuleEvaluator {
             String text = evaluated == null ? "" : evaluated.toString().trim();
             return url && !text.isBlank() ? absolute(baseUrl, text) : text;
         }
-        int chainedJs = value.indexOf("\n@js:");
-        if (chainedJs >= 0) {
-            String initial = one(value.substring(0, chainedJs), input, baseUrl, source, false);
-            Object changed = script.evaluate(value.substring(chainedJs + 5), Map.of("result", initial, "baseUrl", baseUrl), source);
+        int chainedJs = value.indexOf("@js:");
+        if (chainedJs > 0) {
+            String initial = one(value.substring(0, chainedJs).trim(), input, baseUrl, source, false);
+            Object changed = script.evaluate(value.substring(chainedJs + 4), Map.of("result", initial, "baseUrl", baseUrl), source);
             String text = changed == null ? "" : changed.toString();
             return url && !text.isBlank() ? absolute(baseUrl, text) : text;
         }
@@ -121,6 +121,11 @@ public final class RuleEvaluator {
             String result = input instanceof Element element ? elementValue(element, action) : input.toString();
             if (regex.length > 1) result = replaceRule(result, regex);
             result = result.trim();
+            return url && !result.isBlank() ? absolute(baseUrl, result) : result;
+        }
+        if (value.matches("@[A-Za-z_][A-Za-z0-9_:-]*") && input instanceof Element element) {
+            String result = element.attr(value.substring(1)).trim();
+            if (regex.length > 1) result = replaceRule(result, regex).trim();
             return url && !result.isBlank() ? absolute(baseUrl, result) : result;
         }
         int actionAt = value.lastIndexOf('@');

@@ -34,8 +34,8 @@ public final class LiveSourceProbe {
     private LiveSourceProbe() {}
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 2 || !args[0].equals("--catalog"))
-            throw new IllegalArgumentException("Usage: --catalog <catalog-directory> [queries...]");
+        if (args.length < 2 || !(args[0].equals("--catalog") || args[0].equals("--json-url")))
+            throw new IllegalArgumentException("Usage: --catalog <catalog-directory> | --json-url <source-json-url> [--source name-or-url] [--capture-first] [queries...]");
         int queryStart = 2;
         String sourceFilter = "";
         if (args.length >= 4 && args[2].equals("--source")) {
@@ -78,11 +78,22 @@ public final class LiveSourceProbe {
                     Integer.toString(body.length()), title, quality + (redirectHost.isBlank() ? "" : " to=" + redirectHost)));
             return response;
         };
-        Path catalog = Path.of(args[1]);
-        String snapshot = Files.readString(catalog.resolve("CURRENT")).trim();
-        Path uniqueFile = catalog.resolve("snapshots").resolve(snapshot).resolve("unique.json");
+        String snapshot;
+        String sourceJson;
+        if (args[0].equals("--catalog")) {
+            Path catalog = Path.of(args[1]);
+            snapshot = Files.readString(catalog.resolve("CURRENT")).trim();
+            Path uniqueFile = catalog.resolve("snapshots").resolve(snapshot).resolve("unique.json");
+            sourceJson = Files.readString(uniqueFile);
+        } else {
+            URI input = URI.create(args[1]);
+            if (!input.getScheme().equalsIgnoreCase("https"))
+                throw new IllegalArgumentException("Supplemental source JSON must use HTTPS");
+            sourceJson = fetch(client, new FetchRequest(input.toString())).body();
+            snapshot = "supplemental:" + input.getHost();
+        }
         Map<String, Source> unique = new LinkedHashMap<>();
-        SourceImporter.parse(Files.readString(uniqueFile)).sources()
+        SourceImporter.parse(sourceJson).sources()
                 .forEach(source -> unique.putIfAbsent(source.id(), source));
         System.out.println("INVENTORY\tsnapshot=" + snapshot + "\tuniqueSources=" + unique.size());
         System.out.println("source\tkeyword\tstatus\thits\tfirstTitle\tdetail");
@@ -142,8 +153,18 @@ public final class LiveSourceProbe {
         HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(request.url()))
                 .timeout(Duration.ofSeconds(15));
         builder.header("User-Agent", "BookGetterLiveProbe/1.0 (manual compatibility test)");
-        for (Map.Entry<String, String> header : request.headers().entrySet())
-            if (!header.getKey().equalsIgnoreCase("User-Agent")) builder.header(header.getKey(), header.getValue());
+        for (Map.Entry<String, String> header : request.headers().entrySet()) {
+            String name = header.getKey();
+            if (name.equalsIgnoreCase("User-Agent")) continue;
+            // JDK HttpClient owns hop-by-hop headers; Android/Legado may accept them.
+            if (name.equalsIgnoreCase("Connection") || name.equalsIgnoreCase("Host")
+                    || name.equalsIgnoreCase("Content-Length") || name.equalsIgnoreCase("Transfer-Encoding")
+                    || name.equalsIgnoreCase("Upgrade") || name.equalsIgnoreCase("Expect")) {
+                System.out.println(row("TRANSPORT_NOTE", name, "JDK-managed header omitted"));
+                continue;
+            }
+            builder.header(name, header.getValue());
+        }
         if (request.headers().containsKey("User-Agent")) builder.setHeader("User-Agent", request.headers().get("User-Agent"));
         if (request.body() == null) builder.method(request.method(), HttpRequest.BodyPublishers.noBody());
         else builder.method(request.method(), HttpRequest.BodyPublishers.ofString(request.body(), StandardCharsets.UTF_8));
