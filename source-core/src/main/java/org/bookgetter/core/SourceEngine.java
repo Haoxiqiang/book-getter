@@ -316,7 +316,7 @@ public final class SourceEngine {
         String quality = ResponseSignals.quality(response);
         if (quality.equals("BUSINESS_ERROR") || quality.equals("EMPTY_RESPONSE")
                 || quality.equals("CHALLENGE_PAGE") || quality.equals("PARKED_DOMAIN")
-                || quality.equals("APP_UPGRADE_REQUIRED"))
+                || quality.equals("APP_UPGRADE_REQUIRED") || quality.equals("PAGE_NOT_FOUND"))
             throw new SourceFailure(stage, sourceId, field,
                     "Unusable source response: " + quality + " (HTTP " + response.status() + ")");
     }

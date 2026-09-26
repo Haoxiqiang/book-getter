@@ -157,7 +157,8 @@ public final class LiveSourceProbe {
                                     System.out.println(row(source.name(), keyword, "FIELD_WARNING", "", "", field)));
                             boolean suspect = responseQualities.subList(detailQualityStart, responseQualities.size()).stream()
                                     .anyMatch(value -> value.equals("BUSINESS_ERROR") || value.equals("CHALLENGE_PAGE")
-                                            || value.equals("PARKED_DOMAIN") || value.equals("APP_UPGRADE_REQUIRED"));
+                                            || value.equals("PARKED_DOMAIN") || value.equals("APP_UPGRADE_REQUIRED")
+                                            || value.equals("PAGE_NOT_FOUND"));
                             System.out.println(row(source.name(), keyword, suspect ? "DETAIL_SUSPECT" : "DETAIL_OK",
                                     "", detail.hit().name(), detail.tocUrl() + " " + metadataFlags(detail.hit())));
                             List<Chapter> chapters = engine.chapters(source, detail);

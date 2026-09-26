@@ -43,6 +43,7 @@ public final class ResponseSignals {
     public static boolean suspectEmptySearch(String signal) {
         return signal.equals("BUSINESS_ERROR") || signal.equals("CHALLENGE_PAGE")
                 || signal.equals("PARKED_DOMAIN") || signal.equals("APP_UPGRADE_REQUIRED")
+                || signal.equals("PAGE_NOT_FOUND")
                 || signal.equals("UNRESOLVED_REDIRECT") || signal.equals("EMPTY_RESPONSE")
                 || signal.equals("CROSS_HOST_REDIRECT") || signal.equals("SEARCH_ENDPOINT_TO_ROOT")
                 || signal.equals("NON_200_SUCCESS");
@@ -58,6 +59,8 @@ public final class ResponseSignals {
         if (lower.contains("domain may be for sale")) return "PARKED_DOMAIN";
         if (lower.contains("<title>just a moment...") || lower.contains("cloudflare challenge")
                 || lower.contains("cf-chl-")) return "CHALLENGE_PAGE";
+        if (lower.contains("<title>提示信息</title>") && body.contains("所访问的页面不存在"))
+            return "PAGE_NOT_FOUND";
         if (body.contains("当前版本过低") && body.contains("请升级到最新版")) return "APP_UPGRADE_REQUIRED";
         if (body.stripLeading().startsWith("{")) {
             try {

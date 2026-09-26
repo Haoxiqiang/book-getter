@@ -117,3 +117,5 @@ XPath 跨站规则复测：AOAOSTAR 128 集合的黑岩阅读公开 API 搜索 2
 随后用这本已知存在的完整书名复测速读谷原始搜索：JVM/Android 均从 `.co` 发 POST，跨主机最终落在 `.cc` 的 200 搜索表单页、0 命中，分别标为响应可疑；JVM 新增逐跳记录确认为 **POST 301 → GET 200**。直接在 `.cc` POST 同样字段会 302 到该书详情。故“指定详情 URL 的目录成功”没有掩盖“原始源搜索入口失效”；Android 尚无逐跳方法记录，不归咎于 CSS 解析器。详见[速读谷记录](sudugu-paged-catalog-probe.md)。
 
 主目录 rezero 的目录规则 `isVolume=@js:result.attr('href').endsWith('index.html')` 发现 DOM 节点被字符串化后会在目录失败。受控节点 JS 视图修复后，同一快照/同词在 JVM、Android 均搜索 1、详情及公开目录 910 条通过，其中 23 卷标题、887 普通章节；站点 HTML 的两类链接独立计数相同。只重验到目录、不抓正文或整书；原始源 JSON 哈希与公开单源相同。[专项证据](dom-node-js-probe.md)。
+
+另以经致文学验证 HTTP 200 的页面内容边界：搜索“上门龙婿”返回 1 条，但详情 `/books/609` 是明确“不存在”提示页。修复前伪报详情通过、目录规则失败；现在 JVM/Android 均停在 `DETAIL.ruleBookInfo.init / PAGE_NOT_FOUND`。未得到真实目录，故其 `select/hasClass` 规则尚未验证；无正文及下载。[源哈希、命令和阶段证据](jingzhi-notfound-probe.md)。

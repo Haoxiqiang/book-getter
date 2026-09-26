@@ -95,7 +95,8 @@ public final class CompatibilityProbeActivity extends Activity {
                     BookDetail detail = engine.detail(source, hits.get(0));
                     boolean suspect = responseQualities.subList(qualityStart, responseQualities.size()).stream()
                             .anyMatch(value -> value.equals("BUSINESS_ERROR") || value.equals("CHALLENGE_PAGE")
-                                    || value.equals("PARKED_DOMAIN") || value.equals("APP_UPGRADE_REQUIRED"));
+                                    || value.equals("PARKED_DOMAIN") || value.equals("APP_UPGRADE_REQUIRED")
+                                    || value.equals("PAGE_NOT_FOUND"));
                     Log.i(TAG, (suspect ? "DETAIL_SUSPECT" : "DETAIL_OK")
                             + " tocPresent=" + (detail.tocUrl() != null && !detail.tocUrl().isBlank()));
                     List<Chapter> chapters = engine.chapters(source, detail);

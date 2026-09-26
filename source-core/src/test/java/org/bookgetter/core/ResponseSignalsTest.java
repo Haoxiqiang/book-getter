@@ -38,6 +38,10 @@ final class ResponseSignalsTest {
         assertEquals("EMPTY_RESPONSE", quality(200, ""));
         assertEquals("PARKED_DOMAIN", quality(200, "<p>This domain may be for sale.</p>"));
         assertEquals("CHALLENGE_PAGE", quality(200, "<title>Just a moment...</title>"));
+        assertEquals("PAGE_NOT_FOUND", quality(200,
+                "<html><title>提示信息</title><body>所访问的页面不存在</body></html>"));
+        assertTrue(ResponseSignals.suspectEmptySearch("PAGE_NOT_FOUND"));
+        assertEquals("UNCLASSIFIED", quality(200, "<title>提示信息</title><p>请稍后再试</p>"));
         assertEquals("APP_UPGRADE_REQUIRED", quality(200, "{\"code\":0,\"chapter\":{\"body\":\"当前版本过低，请升级到最新版\"}}"));
         StringBuilder escapedNotice = new StringBuilder();
         for (char character : "当前版本过低，请升级到最新版".toCharArray())

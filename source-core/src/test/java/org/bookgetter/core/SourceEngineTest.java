@@ -196,6 +196,18 @@ final class SourceEngineTest {
         assertEquals("searchUrl", failure.field);
     }
 
+    @Test void http200MissingDetailPageFailsBeforeCatalogRules() {
+        Source source = SourceImporter.parse(sourceJson).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
+                "<html><title>提示信息</title><body>所访问的页面不存在</body></html>",
+                200, Map.of()));
+        BookHit hit = new BookHit(source.id(), "https://example.test/book", "Book", "", "", "", Kind.TEXT);
+        SourceFailure failure = assertThrows(SourceFailure.class, () -> engine.detail(source, hit));
+        assertEquals(Stage.DETAIL, failure.stage);
+        assertEquals("ruleBookInfo.init", failure.field);
+        assertTrue(failure.getMessage().contains("PAGE_NOT_FOUND"));
+    }
+
     @Test void emptyAndChallengeResponsesAreNotRuleFailuresOrValidZeroResults() {
         Source source = SourceImporter.parse(sourceJson).sources().get(0);
         for (String body : List.of("", "<title>Just a moment...</title><p>Cloudflare challenge</p>")) {
