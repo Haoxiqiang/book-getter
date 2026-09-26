@@ -33,6 +33,8 @@
 
 阅友小说复测命令：`./gradlew :source-core:liveSourceProbe -PprobeJsonUrl=https://legado.aoaostar.com/sources/71e56d4f.json -PprobeSource=m.suixkan.com -PprobeCaptureFirst=true -PprobeQueries=斗破苍穹`。结果：搜索 5 条；首条《灵破苍穹》详情 HTTP 200，目录 HTTP 200、1649 章，首章 HTTP 200、正文 3671 字符。只读取首章验证规则，未下载全书。实际搜索页含 `.v-list-item` 卡片，书籍链接藏在 `onclick="newWebView('/b/229093.html', '', '')"`；原引擎不支持 `@onclick@js:` 内联链，因 bookUrl 为空而丢弃全部卡片。新增 Java 合成回归后真实链路通过。这证明与主集合的轻小说机翻、rezero 不同的 HTML/属性/JS/长目录路径可用，但不代表其余 21 源可用。
 
+Android 模拟器同词、同源、同样只读首章，得到搜索 5 条、详情成功、目录 1649 章、首章正文 3671 字符。网页正文响应长度与 JVM 相差 3 字符（站点实时页面差异），规则输出一致；此处是跨执行环境正对照，不是整书下载验收。
+
 换词 `诡秘之主` 也返回 5 条（首条《太初之主》）。该站似乎进行宽松/分词匹配；搜索链路通过只表示书源规则能提取返回卡片，不表示精确找到了输入作品。后续验收必须分别检查“解析成功”和“作品匹配度”。
 
 八一中文样本验证了另一缺口：官方 `JsExtensions.ajax` 会把传入字符串交给 `AnalyzeUrl` 解析 URL 选项；本工程原先直接把 `url,{'method':'POST',...}` 传给 HTTP 客户端。现 `java.ajax/get` 也通过 `RequestPlanner`，并补了表单编码的离线回归。此处仍未实现官方完整 `webJs`、`startBrowserAwait`、共享 Cookie 等能力；不能通过静默忽略真人验证来制造“成功”。

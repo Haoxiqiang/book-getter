@@ -55,16 +55,15 @@ public final class LiveSourceProbe {
         CookieManager cookies = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
         HttpClient client = HttpClient.newBuilder().cookieHandler(cookies)
                 .followRedirects(HttpClient.Redirect.NORMAL).connectTimeout(Duration.ofSeconds(12)).build();
+        List<String> responseQualities = new ArrayList<>();
         Transport transport = request -> {
             FetchResponse response = fetch(client, request);
             String body = response.body() == null ? "" : response.body();
             String title = "";
             Matcher titleMatch = Pattern.compile("(?is)<title[^>]*>(.*?)</title>").matcher(body);
             if (titleMatch.find()) title = titleMatch.group(1).replaceAll("<[^>]*>", "");
-            String quality = response.status() >= 300 && response.status() < 400
-                    ? "UNRESOLVED_REDIRECT"
-                    : body.toLowerCase(java.util.Locale.ROOT).contains("domain may be for sale")
-                        ? "PARKED_DOMAIN" : "UNCLASSIFIED";
+            String quality = ResponseSignals.quality(response);
+            responseQualities.add(quality);
             String host;
             try { host = URI.create(response.url()).getHost(); }
             catch (Exception ignored) { host = "invalid-url"; }
@@ -108,8 +107,13 @@ public final class LiveSourceProbe {
                             Integer.toString(hits.size()), first, ""));
                     if (captureFirst && !hits.isEmpty()) {
                         try {
+                            int qualityStart = responseQualities.size();
                             BookDetail detail = engine.detail(source, hits.get(0));
-                            System.out.println(row(source.name(), keyword, "DETAIL_OK", "", detail.hit().name(), detail.tocUrl()));
+                            boolean suspect = responseQualities.subList(qualityStart, responseQualities.size()).stream()
+                                    .anyMatch(value -> value.equals("BUSINESS_ERROR") || value.equals("CHALLENGE_PAGE")
+                                            || value.equals("PARKED_DOMAIN"));
+                            System.out.println(row(source.name(), keyword, suspect ? "DETAIL_SUSPECT" : "DETAIL_OK",
+                                    "", detail.hit().name(), detail.tocUrl()));
                             List<Chapter> chapters = engine.chapters(source, detail);
                             System.out.println(row(source.name(), keyword, "CATALOG_OK", Integer.toString(chapters.size()), "", ""));
                             if (!chapters.isEmpty() && exportFirst == null) {

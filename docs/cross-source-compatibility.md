@@ -18,7 +18,7 @@
 | 轻小说机翻🤖 | 20 条 | 搜索到首章、整书下载链路已实测；但不能代表其他 10 源 |
 | 真白萌 | HTTP 403 | 登录/站点防护边界；不绕过访问控制 |
 | ESJ Zone | 有效 0 命中，本轮未超时 | 需用站内确定收录的作品与 Android 环境再测；追加的 `無職轉生`、`異世界` 探针超时，不能以本轮 0 条证明整源可用 |
-| 再漫画 | 修复默认规则后 10 条 | `@@` 内嵌规则、`class…@tag…` 连续选择器已加 Java 回归测试。首条详情 API 返回 HTTP 200 但 JSON `errno=2, errmsg=漫画不存在`，目录因而失败；站点链接变为 `/details/58227`，源中正则还按旧 `info.xxx.html` 提取 `comic_py`，属于上游规则失配，不能标成详情成功。其 `ruleBookInfo.init` 与 `ruleToc.isVolume` 机制现有离线回归，仍不能越过上游 URL 失配作真实端到端验证 |
+| 再漫画 | 修复默认规则后 10 条 | `@@` 内嵌规则、`class…@tag…` 连续选择器已加 Java 回归测试。首条详情 API 返回 HTTP 200 但 JSON `errno=2, errmsg=漫画不存在`，目录因而失败；站点链接变为 `/details/58227`，源中正则还按旧 `info.xxx.html` 提取 `comic_py`，属于上游规则失配。JVM 与 Android 的探针现均标出 `BUSINESS_ERROR`/`DETAIL_SUSPECT`，不能标成详情成功。其 `ruleBookInfo.init` 与 `ruleToc.isVolume` 机制现有离线回归，仍不能越过上游 URL 失配作真实端到端验证 |
 
 ## 静态规则特征与待补宿主
 
@@ -53,6 +53,7 @@ Android 调试包内提供 `CompatibilityProbeActivity`，可通过 `adb shell a
 | ESJ Zone / 無職轉生 | 请求超时 | 停在搜索请求 | 网络/站点可达性待复测 |
 | 轻之文库轻小说 / 无职转生 | Android `connection closed`，JVM 曾在 TLS 握手失败 | 停在搜索请求 | 两端均未进入复杂 JS 列表规则，不能算规则失败或空结果 |
 | 三七轻小说 / 无职转生 | JVM HTTP 302 到 HTTP 子域（未跟随），Android HTTP 200、975 字节域名出售页 | JVM 现报 `SEARCH.searchUrl` 未解决重定向；Android 表面 0 条 | 两种响应都不是书源搜索结果。`curl` 的普通 UA 可看到页面文案 `This domain may be for sale`；不要计作有效空结果 |
+| 再漫画 / 无职转生 | 搜索 HTML 200；详情 JSON 200 但 `errno=2` | 搜索 10，详情 `DETAIL_SUSPECT`，目录失败 | JVM/Android 均复现；HTTP 200 不等于业务成功，源规则的旧链接提取是上游失配 |
 | 轻小说机翻🤖 / 无职转生 | API 各阶段均 200 | 搜索 20、详情、目录 23、首章 7,945 字符 | Android 上 JSON/JS 路径的正对照；不据此推断其他书源 |
 | rezero / RE0 | 搜索经百度跳转，正文在站点自身，均 200 | 搜索 1、详情、目录 887、首章 1,979 字符 | Android 上跨域请求/静态 HTML 路径的正对照 |
 

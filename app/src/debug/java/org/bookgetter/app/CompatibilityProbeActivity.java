@@ -13,6 +13,7 @@ import org.bookgetter.core.Models.Source;
 import org.bookgetter.core.Models.SourceFailure;
 import org.bookgetter.core.SourceEngine;
 import org.bookgetter.core.SourceImporter;
+import org.bookgetter.core.ResponseSignals;
 import org.bookgetter.core.Transport;
 import org.bookgetter.runtime.AndroidTransport;
 
@@ -39,6 +40,7 @@ public final class CompatibilityProbeActivity extends Activity {
                 Source source = SourceImporter.parse(json).sources().stream()
                         .filter(item -> item.id().contains(sourceFilter) || item.name().contains(sourceFilter))
                         .findFirst().orElseThrow(() -> new IllegalArgumentException("No source: " + sourceFilter));
+                List<String> responseQualities = new java.util.ArrayList<>();
                 Transport observed = request -> {
                     if (request.webView() && webViewDelayOverride >= 0)
                         request = new FetchRequest(request.url(), request.method(), request.headers(), request.body(),
@@ -48,8 +50,8 @@ public final class CompatibilityProbeActivity extends Activity {
                     String title = "";
                     java.util.regex.Matcher titleMatch = java.util.regex.Pattern.compile("(?is)<title[^>]*>(.*?)</title>").matcher(body);
                     if (titleMatch.find()) title = titleMatch.group(1).replaceAll("<[^>]*>", "");
-                    String quality = body.toLowerCase(java.util.Locale.ROOT).contains("domain may be for sale")
-                            ? "PARKED_DOMAIN" : "UNCLASSIFIED";
+                    String quality = ResponseSignals.quality(response);
+                    responseQualities.add(quality);
                     String host;
                     try { host = new java.net.URI(response.url()).getHost(); }
                     catch (Exception ignored) { host = "invalid-url"; }
@@ -64,8 +66,13 @@ public final class CompatibilityProbeActivity extends Activity {
                 Log.i(TAG, clean((hits.isEmpty() ? "SEARCH_ZERO_UNVERIFIED" : "SEARCH_OK")
                         + " hits=" + hits.size() + (hits.isEmpty() ? "" : " first=" + hits.get(0).name())));
                 if (captureFirst && !hits.isEmpty()) {
+                    int qualityStart = responseQualities.size();
                     BookDetail detail = engine.detail(source, hits.get(0));
-                    Log.i(TAG, "DETAIL_OK tocPresent=" + (detail.tocUrl() != null && !detail.tocUrl().isBlank()));
+                    boolean suspect = responseQualities.subList(qualityStart, responseQualities.size()).stream()
+                            .anyMatch(value -> value.equals("BUSINESS_ERROR") || value.equals("CHALLENGE_PAGE")
+                                    || value.equals("PARKED_DOMAIN"));
+                    Log.i(TAG, (suspect ? "DETAIL_SUSPECT" : "DETAIL_OK")
+                            + " tocPresent=" + (detail.tocUrl() != null && !detail.tocUrl().isBlank()));
                     List<Chapter> chapters = engine.chapters(source, detail);
                     Log.i(TAG, clean("CATALOG_OK chapters=" + chapters.size()));
                     Chapter first = chapters.stream().filter(chapter -> !chapter.volume()).findFirst().orElse(null);
