@@ -131,7 +131,8 @@ public final class LiveSourceProbe {
                                         .anyMatch(value -> value.equals("BUSINESS_ERROR") || value.equals("APP_UPGRADE_REQUIRED")
                                                 || value.equals("CHALLENGE_PAGE") || value.equals("PARKED_DOMAIN"));
                                 System.out.println(row(source.name(), keyword, suspectContent ? "CONTENT_SUSPECT" : "CONTENT_OK", "", "",
-                                        "characters=" + (content.text() == null ? 0 : content.text().length())));
+                                        "characters=" + (content.text() == null ? 0 : content.text().length())
+                                                + " resources=" + content.resources().size()));
                             }
                             if (exportFirst != null) {
                                 var contents = new ArrayList<org.bookgetter.core.Models.ChapterContent>();

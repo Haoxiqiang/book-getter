@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -172,8 +173,23 @@ public final class SourceEngine {
             if (source.kind() == Kind.TEXT) return new ChapterContent(chapter, Kind.TEXT, text, List.of());
             List<Resource> resources = new ArrayList<>();
             if (source.kind() == Kind.IMAGE) {
-                for (Element image : Jsoup.parse(text, chapter.url()).select("img[src]")) resources.add(new Resource(image.absUrl("src"), image.attr("alt"), "image/*"));
-            } else resources.add(new Resource(RuleEvaluator.absolute(chapter.url(), text.trim()), chapter.title(), null));
+                for (Element image : Jsoup.parse(text, chapter.url()).select("img[src]")) {
+                    String link = image.absUrl("src");
+                    if (httpResource(link)) resources.add(new Resource(link, image.attr("alt"), "image/*"));
+                }
+                if (resources.isEmpty()) throw new SourceFailure(Stage.CONTENT, source.id(), "ruleContent.content",
+                        "No valid image resources found");
+            } else {
+                String link = RuleEvaluator.absolute(chapter.url(), text.trim());
+                if (!httpResource(link)) {
+                    String sourceRegex = source.rule("ruleContent", "sourceRegex");
+                    String field = sourceRegex == null || sourceRegex.isBlank()
+                            ? "ruleContent.content" : "ruleContent.sourceRegex";
+                    throw new SourceFailure(Stage.CONTENT, source.id(), field,
+                            "No valid media URL; WebView resource sniffing is not implemented");
+                }
+                resources.add(new Resource(link, chapter.title(), null));
+            }
             return new ChapterContent(chapter, source.kind(), null, resources);
         } catch (SourceFailure e) { throw e; }
         catch (Exception e) { throw new SourceFailure(Stage.CONTENT, source.id(), "ruleContent", e.getMessage(), e); }
@@ -236,6 +252,13 @@ public final class SourceEngine {
         String value = text.trim();
         return value.isEmpty() || value.equalsIgnoreCase("null") || value.equalsIgnoreCase("undefined")
                 || (value.startsWith("当前版本过低") && value.contains("请升级到最新版"));
+    }
+    private static boolean httpResource(String link) {
+        try {
+            URI uri = URI.create(link);
+            return (uri.getScheme().equalsIgnoreCase("https") || uri.getScheme().equalsIgnoreCase("http"))
+                    && uri.getHost() != null && !uri.getHost().isBlank();
+        } catch (Exception ignored) { return false; }
     }
     private static String absoluteIfPresent(String base, String value) {
         return value.isBlank() ? "" : RuleEvaluator.absolute(base, value);

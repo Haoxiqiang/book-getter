@@ -86,6 +86,60 @@ final class SourceEngineTest {
         assertEquals("ruleContent.content", failure.field);
     }
 
+    @Test void audioHtmlIsNotAPlayableResourceWithoutSourceSniffing() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://audio.example.test","bookSourceType":1,
+             "ruleContent":{"content":"<js>result</js>","sourceRegex":".*\\\\.mp3"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
+                "<html><body>Player page</body></html>", 200, Map.of()));
+        BookHit hit = new BookHit(source.id(), "https://audio.example.test/book", "Book", "", "", "", Kind.AUDIO);
+        BookDetail book = new BookDetail(hit, hit.url(), List.of());
+        Chapter chapter = new Chapter(hit.url(), "https://audio.example.test/one", "One", 0, false, false);
+        SourceFailure failure = assertThrows(SourceFailure.class, () -> engine.content(source, book, chapter));
+        assertEquals("ruleContent.sourceRegex", failure.field);
+    }
+
+    @Test void imageChapterRequiresImageResources() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://comic.example.test","bookSourceType":2,
+             "ruleContent":{"content":"div.pages@html"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
+                "<div class='pages'>No pages</div>", 200, Map.of()));
+        BookHit hit = new BookHit(source.id(), "https://comic.example.test/book", "Book", "", "", "", Kind.IMAGE);
+        BookDetail book = new BookDetail(hit, hit.url(), List.of());
+        Chapter chapter = new Chapter(hit.url(), "https://comic.example.test/one", "One", 0, false, false);
+        assertEquals("ruleContent.content", assertThrows(SourceFailure.class,
+                () -> engine.content(source, book, chapter)).field);
+    }
+
+    @Test void directAudioAndImageUrlsRemainUsable() {
+        Source audio = SourceImporter.parse("""
+            {"bookSourceUrl":"https://audio.example.test","bookSourceType":1,
+             "ruleContent":{"content":"a.stream@href"}}
+            """).sources().get(0);
+        SourceEngine audioEngine = new SourceEngine(request -> new FetchResponse(request.url(),
+                "<a class='stream' href='/stream/1'>Play</a>", 200, Map.of()));
+        BookHit audioHit = new BookHit(audio.id(), "https://audio.example.test/book", "Audio", "", "", "", Kind.AUDIO);
+        BookDetail audioBook = new BookDetail(audioHit, audioHit.url(), List.of());
+        Chapter audioChapter = new Chapter(audioHit.url(), "https://audio.example.test/one", "One", 0, false, false);
+        assertEquals("https://audio.example.test/stream/1",
+                audioEngine.content(audio, audioBook, audioChapter).resources().get(0).url());
+
+        Source image = SourceImporter.parse("""
+            {"bookSourceUrl":"https://comic.example.test","bookSourceType":2,
+             "ruleContent":{"content":"div.pages@html"}}
+            """).sources().get(0);
+        SourceEngine imageEngine = new SourceEngine(request -> new FetchResponse(request.url(),
+                "<div class='pages'><img src='/page/1.jpg'></div>", 200, Map.of()));
+        BookHit imageHit = new BookHit(image.id(), "https://comic.example.test/book", "Comic", "", "", "", Kind.IMAGE);
+        BookDetail imageBook = new BookDetail(imageHit, imageHit.url(), List.of());
+        Chapter imageChapter = new Chapter(imageHit.url(), "https://comic.example.test/one", "One", 0, false, false);
+        assertEquals("https://comic.example.test/page/1.jpg",
+                imageEngine.content(image, imageBook, imageChapter).resources().get(0).url());
+    }
+
     @Test void contentPaginationStopsAtKnownNextChapter() {
         Source source = SourceImporter.parse("""
             {"bookSourceUrl":"https://example.test","ruleContent":{
