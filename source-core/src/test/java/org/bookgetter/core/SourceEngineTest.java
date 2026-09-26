@@ -16,6 +16,32 @@ final class SourceEngineTest {
          "ruleContent":{"content":"div.content@text"}}
         """;
 
+    @Test void legacyDomIndexesSelectFieldElementsAndExcludeHeaderRows() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","bookSourceName":"indexed",
+             "searchUrl":"/search?q={{key}}",
+             "ruleSearch":{"bookList":"class.results@tag.li!0",
+               "name":"class.title@tag.a.0@text",
+               "bookUrl":"class.title@tag.a.0@href",
+               "author":"class.meta@tag.span.-1@text"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(), """
+            <ul class='results'>
+              <li><span>Header</span></li>
+              <li><div class='title'><a href='/first'>First</a><a href='/other'>Other</a></div>
+                  <div class='meta'><span>Type</span><span>Author A</span></div></li>
+              <li><div class='title'><a href='/second'>Second</a></div>
+                  <div class='meta'><span>Author B</span></div></li>
+            </ul>
+            """, 200, Map.of()));
+        List<BookHit> hits = engine.search(source, "query", 1);
+        assertEquals(2, hits.size());
+        assertEquals("First", hits.get(0).name());
+        assertEquals("https://example.test/first", hits.get(0).url());
+        assertEquals("Author A", hits.get(0).author());
+        assertEquals("Second", hits.get(1).name());
+    }
+
     @Test void importSearchDetailCatalogContent() {
         Source source = SourceImporter.parse(sourceJson).sources().get(0);
         Transport transport = request -> {

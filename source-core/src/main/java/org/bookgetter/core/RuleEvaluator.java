@@ -366,10 +366,23 @@ public final class RuleEvaluator {
 
     private static List<Object> select(Object input, String selector, String baseUrl) {
         Element element = input instanceof Element e ? e : Jsoup.parse(input.toString(), baseUrl);
-        if (selector.startsWith("class.") && selector.substring(6).contains(" "))
-            return new ArrayList<>(element.getElementsByClass(selector.substring(6)));
-        String normalized = normalizeSelector(selector);
-        return normalized.isBlank() ? List.of() : new ArrayList<>(element.select(normalized));
+        Matcher index = Pattern.compile("^(.*?)([.!])(-?\\d+)$").matcher(selector);
+        String baseSelector = index.matches() ? index.group(1) : selector;
+        List<Object> found;
+        if (baseSelector.startsWith("class.") && baseSelector.substring(6).contains(" "))
+            found = new ArrayList<>(element.getElementsByClass(baseSelector.substring(6)));
+        else {
+            String normalized = normalizeSelector(baseSelector);
+            found = normalized.isBlank() ? List.of() : new ArrayList<>(element.select(normalized));
+        }
+        if (!index.matches()) return found;
+        int position = Integer.parseInt(index.group(3));
+        if (position < 0) position += found.size();
+        if (position < 0 || position >= found.size()) return index.group(2).equals("!") ? found : List.of();
+        if (index.group(2).equals(".")) return List.of(found.get(position));
+        List<Object> remaining = new ArrayList<>(found);
+        remaining.remove(position);
+        return remaining;
     }
 
     public static String absolute(String base, String path) {

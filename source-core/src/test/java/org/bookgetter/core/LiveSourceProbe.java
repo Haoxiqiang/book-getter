@@ -40,7 +40,7 @@ public final class LiveSourceProbe {
 
     public static void main(String[] args) throws Exception {
         if (args.length < 2 || !(args[0].equals("--catalog") || args[0].equals("--json-url")))
-            throw new IllegalArgumentException("Usage: --catalog <catalog-directory> | --json-url <source-json-url> [--source name-or-url] [--capture-first] [queries...]");
+            throw new IllegalArgumentException("Usage: --catalog <catalog-directory> | --json-url <source-json-url> [--source name-or-url[,name-or-url...]] [--capture-first] [queries...]");
         int queryStart = 2;
         String sourceFilter = "";
         if (args.length >= 4 && args[2].equals("--source")) {
@@ -103,7 +103,7 @@ public final class LiveSourceProbe {
         System.out.println("source\tkeyword\tstatus\thits\tfirstTitle\tdetail");
         SourceEngine engine = new SourceEngine(transport);
         for (Source source : unique.values()) {
-            if (!source.id().contains(sourceFilter) && !source.name().contains(sourceFilter)) continue;
+            if (!matchesSource(source, sourceFilter)) continue;
             for (String keyword : queries) {
                 try {
                     int qualityStart = responseQualities.size();
@@ -168,6 +168,16 @@ public final class LiveSourceProbe {
                 Thread.sleep(1500);
             }
         }
+    }
+
+    static boolean matchesSource(Source source, String sourceFilter) {
+        if (sourceFilter == null || sourceFilter.isBlank()) return true;
+        for (String token : sourceFilter.split(",")) {
+            String candidate = token.trim();
+            if (!candidate.isEmpty() && (source.id().contains(candidate) || source.name().contains(candidate)))
+                return true;
+        }
+        return false;
     }
 
     static FetchResponse fetch(HttpClient client, FetchRequest request) throws Exception {
