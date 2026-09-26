@@ -58,6 +58,15 @@ final class SourceEngineTest {
         assertTrue(engine.search(source, "missing", 1).isEmpty());
     }
 
+    @Test void businessErrorSearchIsNotAnEmptyResult() {
+        Source source = SourceImporter.parse(sourceJson).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
+                "{\"code\":-1,\"msg\":\"No user\"}", 200, Map.of()));
+        SourceFailure failure = assertThrows(SourceFailure.class, () -> engine.search(source, "book", 1));
+        assertEquals(Stage.SEARCH, failure.stage);
+        assertEquals("searchUrl", failure.field);
+    }
+
     @Test void nullLikeChapterIsNotSuccessfulContent() {
         Source source = SourceImporter.parse(sourceJson).sources().get(0);
         SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
@@ -513,6 +522,35 @@ final class SourceEngineTest {
         BookDetail secondDetail = engine.detail(source, second);
         assertEquals("https://content.example.test/A42/1", engine.chapters(source, firstDetail).get(0).url());
         assertEquals("https://content.example.test/B43/1", engine.chapters(source, secondDetail).get(0).url());
+    }
+
+    @Test void detailInitKeepsJsonObjectForFollowingFields() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://api.example.test","ruleBookInfo":{
+              "init":"$.data","name":"$.novelName","author":"$.authorName",
+              "tocUrl":"/novel/{{$.novelId}}/chapters"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
+                "{\"code\":200,\"data\":{\"novelName\":\"Object Book\",\"authorName\":\"A\",\"novelId\":\"42\"}}",
+                200, Map.of()));
+        BookHit hit = new BookHit(source.id(), "https://api.example.test/book/42", "Search Book", "", "", "", Kind.TEXT);
+        BookDetail detail = engine.detail(source, hit);
+        assertEquals("Object Book", detail.hit().name());
+        assertEquals("A", detail.hit().author());
+        assertEquals("https://api.example.test/novel/42/chapters", detail.tocUrl());
+    }
+
+    @Test void detailBusinessErrorCannotBecomeAnEmptyCatalogUrl() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://api.example.test","ruleBookInfo":{
+              "init":"$.data","tocUrl":"/novel/{{$.novelId}}/chapters"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
+                "{\"code\":4004,\"msg\":\"Missing client headers\",\"data\":[]}", 200, Map.of()));
+        BookHit hit = new BookHit(source.id(), "https://api.example.test/book/42", "Book", "", "", "", Kind.TEXT);
+        SourceFailure failure = assertThrows(SourceFailure.class, () -> engine.detail(source, hit));
+        assertEquals(Stage.DETAIL, failure.stage);
+        assertEquals("ruleBookInfo.init", failure.field);
     }
 
     @Test void combinedRulesDoNotSplitJsonPathFilterOperators() {

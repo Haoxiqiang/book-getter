@@ -31,6 +31,21 @@ public final class RuleEvaluator {
     public void enterBook(String bookUrl) { scope.set(bookUrl); }
     public void leaveBook() { scope.remove(); }
 
+    /** Detail init follows Legado getElement: keep a JSON object or DOM node structured. */
+    public Object element(String rule, Object input, String baseUrl, Source source) {
+        if (rule == null || rule.isBlank()) return input;
+        String value = rule.trim();
+        if (value.startsWith("@json:") || value.startsWith("$.") || value.startsWith("$[")) {
+            String path = value.startsWith("@json:") ? value.substring(6) : value;
+            try { return JsonPath.read(input instanceof String ? (String) input : new com.google.gson.Gson().toJson(input), path); }
+            catch (com.jayway.jsonpath.PathNotFoundException ignored) { return null; }
+        }
+        if (value.startsWith("@js:") || value.startsWith("<js>"))
+            return one(value, input, baseUrl, source, false);
+        List<Object> found = many(value, input, baseUrl, source);
+        return found.size() == 1 ? found.get(0) : found;
+    }
+
     private Map<String, String> variables(Source source) {
         return variables.computeIfAbsent(scope.get() == null ? source.id() : scope.get(),
                 ignored -> new ConcurrentHashMap<>());

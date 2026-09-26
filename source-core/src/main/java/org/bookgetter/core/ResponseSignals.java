@@ -40,7 +40,10 @@ public final class ResponseSignals {
                     if (object.has("code") && object.get("code").isJsonPrimitive()
                             && object.get("code").getAsJsonPrimitive().isNumber()
                             && object.get("code").getAsInt() != 0 && object.get("code").getAsInt() != 200
-                            && object.has("data") && object.get("data").isJsonNull()
+                            && (object.get("code").getAsInt() < 0
+                                    || (object.has("data") && (object.get("data").isJsonNull()
+                                            || (object.get("data").isJsonArray()
+                                                    && object.getAsJsonArray("data").isEmpty()))))
                             && (object.has("message") || object.has("msg")))
                         return "BUSINESS_ERROR";
                 }

@@ -34,6 +34,9 @@ public final class SourceEngine {
             try { response = fetch(requests.plan(source.string("searchUrl"), source, keyword, page, source.id())); }
             catch (SourceFailure e) { throw e; }
             catch (Exception e) { throw new SourceFailure(Stage.SEARCH, source.id(), "searchUrl", e.getMessage(), e); }
+            if (ResponseSignals.quality(response).equals("BUSINESS_ERROR"))
+                throw new SourceFailure(Stage.SEARCH, source.id(), "searchUrl",
+                        "Source returned a business error despite HTTP " + response.status());
             String listRule = source.rule("ruleSearch", "bookList");
             List<Object> items = rules.many(listRule, response.body(), response.url(), source);
             List<BookHit> hits = new ArrayList<>();
@@ -57,10 +60,17 @@ public final class SourceEngine {
         try {
             if (source.isJsSource()) return jsDetail(source, hit);
             FetchResponse response = fetch(requests.plan(hit.url(), source, "", 1, source.id()));
+            if (ResponseSignals.quality(response).equals("BUSINESS_ERROR"))
+                throw new SourceFailure(Stage.DETAIL, source.id(), "ruleBookInfo.init",
+                        "Source returned a business error despite HTTP " + response.status());
             Object detailContent = response.body();
             String init = source.rule("ruleBookInfo", "init");
-            if (init != null && !init.isBlank())
-                detailContent = field(source, "ruleBookInfo", "init", detailContent, response.url(), false);
+            if (init != null && !init.isBlank()) {
+                try { detailContent = rules.element(init, detailContent, response.url(), source); }
+                catch (Exception e) { throw new SourceFailure(Stage.DETAIL, source.id(), "ruleBookInfo.init", e.getMessage(), e); }
+                if (detailContent == null) throw new SourceFailure(Stage.DETAIL, source.id(),
+                        "ruleBookInfo.init", "Initialization rule matched no detail object");
+            }
             String name = field(source, "ruleBookInfo", "name", detailContent, response.url(), false);
             String author = field(source, "ruleBookInfo", "author", detailContent, response.url(), false);
             String intro = field(source, "ruleBookInfo", "intro", detailContent, response.url(), false);

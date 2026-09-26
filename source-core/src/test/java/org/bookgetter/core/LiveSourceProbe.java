@@ -1,5 +1,8 @@
 package org.bookgetter.core;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.CookieManager;
 import java.net.CookiePolicy;
 import java.net.URI;
@@ -18,6 +21,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.InflaterInputStream;
 import org.bookgetter.core.Models.BookHit;
 import org.bookgetter.core.Models.BookDetail;
 import org.bookgetter.core.Models.Chapter;
@@ -192,7 +197,22 @@ public final class LiveSourceProbe {
                 : Charset.forName(request.charset());
         Map<String, String> headers = new LinkedHashMap<>();
         response.headers().map().forEach((key, values) -> headers.put(key, String.join(", ", values)));
-        return new FetchResponse(response.uri().toString(), new String(response.body(), charset), response.statusCode(), headers);
+        String encoding = response.headers().firstValue("Content-Encoding").orElse("");
+        return new FetchResponse(response.uri().toString(),
+                new String(decodeBody(response.body(), encoding), charset), response.statusCode(), headers);
+    }
+
+    static byte[] decodeBody(byte[] bytes, String contentEncoding) throws IOException {
+        if (!contentEncoding.equalsIgnoreCase("gzip") && !contentEncoding.equalsIgnoreCase("deflate"))
+            return bytes;
+        try (InputStream compressed = new ByteArrayInputStream(bytes);
+             InputStream decoded = contentEncoding.equalsIgnoreCase("gzip")
+                     ? new GZIPInputStream(compressed) : new InflaterInputStream(compressed)) {
+            byte[] result = decoded.readNBytes(16 * 1024 * 1024 + 1);
+            if (result.length > 16 * 1024 * 1024)
+                throw new IOException("Compressed response exceeds 16 MiB decoded limit");
+            return result;
+        }
     }
 
     private static String row(String... columns) {
