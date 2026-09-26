@@ -12,6 +12,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 import org.bookgetter.core.Models.*;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Element;
@@ -41,8 +43,19 @@ public final class SourceEngine {
             catch (SourceFailure e) { throw e; }
             catch (Exception e) { throw new SourceFailure(Stage.SEARCH, source.id(), "searchUrl", e.getMessage(), e); }
             rejectUnusableResponse(response, Stage.SEARCH, source.id(), "searchUrl");
+            String bookUrlPattern = source.string("bookUrlPattern");
+            if (bookUrlPattern != null && !bookUrlPattern.isEmpty()) {
+                try {
+                    if (Pattern.compile(bookUrlPattern).matcher(response.url()).matches())
+                        return directDetailSearch(source, response);
+                } catch (PatternSyntaxException e) {
+                    throw new SourceFailure(Stage.SEARCH, source.id(), "bookUrlPattern", e.getMessage(), e);
+                }
+            }
             String listRule = source.rule("ruleSearch", "bookList");
             List<Object> items = rules.many(listRule, response.body(), response.url(), source);
+            if (items.isEmpty() && (bookUrlPattern == null || bookUrlPattern.isEmpty()))
+                return directDetailSearch(source, response);
             List<BookHit> hits = new ArrayList<>();
             for (Object item : items) {
                 rules.enterSearchItem();
@@ -63,6 +76,33 @@ public final class SourceEngine {
             return hits;
         } catch (SourceFailure e) { throw e; }
         catch (Exception e) { throw new SourceFailure(Stage.SEARCH, source.id(), "ruleSearch", e.getMessage(), e); }
+    }
+
+    /** Legado treats a matching final search URL, or an empty list without a pattern, as a detail page. */
+    private List<BookHit> directDetailSearch(Source source, FetchResponse response) {
+        rules.enterBook(response.url(), Map.of());
+        try {
+            Object detail = response.body();
+            String init = source.rule("ruleBookInfo", "init");
+            if (init != null && !init.isBlank()) {
+                try { detail = rules.element(init, detail, response.url(), source); }
+                catch (Exception e) { throw new SourceFailure(Stage.SEARCH, source.id(),
+                        "ruleBookInfo.init", e.getMessage(), e); }
+                if (detail == null) return List.of();
+            }
+            String name = field(source, "ruleBookInfo", "name", detail, response.url(), false);
+            if (name.isBlank()) return List.of();
+            String author = field(source, "ruleBookInfo", "author", detail, response.url(), false);
+            String intro = optionalField(source, "ruleBookInfo", "intro", detail, response.url(), false);
+            String cover = optionalField(source, "ruleBookInfo", "coverUrl", detail, response.url(), true);
+            String genre = optionalField(source, "ruleBookInfo", "kind", detail, response.url(), false);
+            String wordCount = optionalField(source, "ruleBookInfo", "wordCount", detail, response.url(), false);
+            String lastChapter = optionalField(source, "ruleBookInfo", "lastChapter", detail, response.url(), false);
+            return List.of(new BookHit(source.id(), response.url(), name, author, intro, cover,
+                    source.kind(), genre, wordCount, lastChapter, rules.bookVariables(response.url())));
+        } catch (SourceFailure e) {
+            throw new SourceFailure(Stage.SEARCH, source.id(), e.field, e.getMessage(), e);
+        } finally { rules.leaveBook(); }
     }
 
     public BookDetail detail(Source source, BookHit hit) {

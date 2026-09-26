@@ -16,6 +16,58 @@ final class SourceEngineTest {
          "ruleContent":{"content":"div.content@text"}}
         """;
 
+    @Test void matchingFinalSearchUrlUsesDetailRulesWithoutFetchingAgain() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","searchUrl":"/search?q={{key}}",
+             "bookUrlPattern":"https://example\\\\.test/book/[0-9]+",
+             "ruleSearch":{"bookList":"li.result","name":"a@text","bookUrl":"a@href"},
+             "ruleBookInfo":{"name":"h1@text","author":".author@text","intro":".intro@text"}}
+            """).sources().get(0);
+        int[] fetches = {0};
+        SourceEngine engine = new SourceEngine(request -> {
+            fetches[0]++;
+            return new FetchResponse("https://example.test/book/42", """
+                <h1>Direct Result</h1><span class='author'>Writer</span>
+                <p class='intro'>Summary</p>
+                """, 200, Map.of());
+        });
+        List<BookHit> hits = engine.search(source, "title", 1);
+        assertEquals(1, fetches[0]);
+        assertEquals(1, hits.size());
+        assertEquals("https://example.test/book/42", hits.get(0).url());
+        assertEquals("Direct Result", hits.get(0).name());
+        assertEquals("Writer", hits.get(0).author());
+        assertEquals("Summary", hits.get(0).intro());
+    }
+
+    @Test void emptySearchListFallsBackToDetailOnlyWhenPatternIsAbsent() {
+        String rules = """
+            "searchUrl":"/search?q={{key}}",
+            "ruleSearch":{"bookList":"li.result","name":"a@text","bookUrl":"a@href"},
+            "ruleBookInfo":{"name":"h1@text","author":".author@text"}
+            """;
+        Source withoutPattern = SourceImporter.parse("{" +
+                "\"bookSourceUrl\":\"https://example.test\"," + rules + "}").sources().get(0);
+        Source withPattern = SourceImporter.parse("{" +
+                "\"bookSourceUrl\":\"https://example.test\",\"bookUrlPattern\":\"/never\"," + rules + "}")
+                .sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
+                "<h1>Fallback</h1><span class='author'>Writer</span>", 200, Map.of()));
+        assertEquals("Fallback", engine.search(withoutPattern, "title", 1).get(0).name());
+        assertTrue(engine.search(withPattern, "title", 1).isEmpty());
+    }
+
+    @Test void invalidBookUrlPatternReportsItsOwnField() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","searchUrl":"/search?q={{key}}",
+             "bookUrlPattern":"["}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(), "<h1>Book</h1>", 200, Map.of()));
+        SourceFailure failure = assertThrows(SourceFailure.class, () -> engine.search(source, "book", 1));
+        assertEquals(Stage.SEARCH, failure.stage);
+        assertEquals("bookUrlPattern", failure.field);
+    }
+
     @Test void legacyDomIndexesSelectFieldElementsAndExcludeHeaderRows() {
         Source source = SourceImporter.parse("""
             {"bookSourceUrl":"https://example.test","bookSourceName":"indexed",
