@@ -40,14 +40,15 @@ public final class LiveSourceProbe {
 
     public static void main(String[] args) throws Exception {
         if (args.length < 2 || !(args[0].equals("--catalog") || args[0].equals("--json-url")))
-            throw new IllegalArgumentException("Usage: --catalog <catalog-directory> | --json-url <source-json-url> [--source name-or-url[,name-or-url...]] [--capture-first] [queries...]");
+            throw new IllegalArgumentException("Usage: --catalog <catalog-directory> | --json-url <source-json-url> [--source name-or-url[,name-or-url...]] [--catalog-first | --capture-first] [queries...]");
         int queryStart = 2;
         String sourceFilter = "";
         if (args.length >= 4 && args[2].equals("--source")) {
             sourceFilter = args[3];
             queryStart = 4;
         }
-        boolean captureFirst = args.length > queryStart && args[queryStart].equals("--capture-first");
+        boolean catalogFirst = args.length > queryStart && args[queryStart].equals("--catalog-first");
+        boolean captureFirst = catalogFirst || (args.length > queryStart && args[queryStart].equals("--capture-first"));
         if (captureFirst) queryStart++;
         Path exportFirst = null;
         if (args.length > queryStart + 1 && args[queryStart].equals("--export-first")) {
@@ -126,8 +127,9 @@ public final class LiveSourceProbe {
                             System.out.println(row(source.name(), keyword, suspect ? "DETAIL_SUSPECT" : "DETAIL_OK",
                                     "", detail.hit().name(), detail.tocUrl()));
                             List<Chapter> chapters = engine.chapters(source, detail);
-                            System.out.println(row(source.name(), keyword, "CATALOG_OK", Integer.toString(chapters.size()), "", ""));
-                            if (!chapters.isEmpty() && exportFirst == null) {
+                            System.out.println(row(source.name(), keyword, "CATALOG_OK", Integer.toString(chapters.size()), "",
+                                    chapters.isEmpty() ? "" : "firstUrl=" + chapters.get(0).url()));
+                            if (!chapters.isEmpty() && exportFirst == null && !catalogFirst) {
                                 Chapter firstChapter = chapters.stream().filter(chapter -> !chapter.volume()).findFirst().orElseThrow();
                                 int contentQualityStart = responseQualities.size();
                                 var content = engine.content(source, detail, firstChapter,

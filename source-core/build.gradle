@@ -24,7 +24,9 @@ tasks.register('liveSourceProbe', JavaExec) {
     if (project.hasProperty('probeSource')) {
         args '--source', project.property('probeSource').toString()
     }
-    if (project.hasProperty('probeCaptureFirst') && project.property('probeCaptureFirst').toString().toBoolean()) {
+    if (project.hasProperty('probeCatalogFirst') && project.property('probeCatalogFirst').toString().toBoolean()) {
+        args '--catalog-first'
+    } else if (project.hasProperty('probeCaptureFirst') && project.property('probeCaptureFirst').toString().toBoolean()) {
         args '--capture-first'
     }
     if (project.hasProperty('probeExportFirst')) {

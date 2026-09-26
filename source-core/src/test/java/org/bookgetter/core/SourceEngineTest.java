@@ -93,6 +93,17 @@ final class SourceEngineTest {
         assertEquals("searchUrl", failure.field);
     }
 
+    @Test void emptyAndChallengeResponsesAreNotRuleFailuresOrValidZeroResults() {
+        Source source = SourceImporter.parse(sourceJson).sources().get(0);
+        for (String body : List.of("", "<title>Just a moment...</title><p>Cloudflare challenge</p>")) {
+            SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(), body, 200, Map.of()));
+            SourceFailure failure = assertThrows(SourceFailure.class, () -> engine.search(source, "book", 1));
+            assertEquals(Stage.SEARCH, failure.stage);
+            assertEquals("searchUrl", failure.field);
+            assertTrue(failure.getMessage().contains("Unusable source response"));
+        }
+    }
+
     @Test void nullLikeChapterIsNotSuccessfulContent() {
         Source source = SourceImporter.parse(sourceJson).sources().get(0);
         SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),

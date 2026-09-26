@@ -34,9 +34,7 @@ public final class SourceEngine {
             try { response = fetch(requests.plan(source.string("searchUrl"), source, keyword, page, source.id())); }
             catch (SourceFailure e) { throw e; }
             catch (Exception e) { throw new SourceFailure(Stage.SEARCH, source.id(), "searchUrl", e.getMessage(), e); }
-            if (ResponseSignals.quality(response).equals("BUSINESS_ERROR"))
-                throw new SourceFailure(Stage.SEARCH, source.id(), "searchUrl",
-                        "Source returned a business error despite HTTP " + response.status());
+            rejectUnusableResponse(response, Stage.SEARCH, source.id(), "searchUrl");
             String listRule = source.rule("ruleSearch", "bookList");
             List<Object> items = rules.many(listRule, response.body(), response.url(), source);
             List<BookHit> hits = new ArrayList<>();
@@ -60,9 +58,7 @@ public final class SourceEngine {
         try {
             if (source.isJsSource()) return jsDetail(source, hit);
             FetchResponse response = fetch(requests.plan(hit.url(), source, "", 1, source.id()));
-            if (ResponseSignals.quality(response).equals("BUSINESS_ERROR"))
-                throw new SourceFailure(Stage.DETAIL, source.id(), "ruleBookInfo.init",
-                        "Source returned a business error despite HTTP " + response.status());
+            rejectUnusableResponse(response, Stage.DETAIL, source.id(), "ruleBookInfo.init");
             Object detailContent = response.body();
             String init = source.rule("ruleBookInfo", "init");
             if (init != null && !init.isBlank()) {
@@ -286,6 +282,15 @@ public final class SourceEngine {
             throw new IllegalStateException("Unresolved HTTP redirect " + response.status() + " at " + request.url());
         if (response.status() >= 400) throw new IllegalStateException("HTTP " + response.status() + " at " + request.url());
         return response;
+    }
+
+    private static void rejectUnusableResponse(FetchResponse response, Stage stage, String sourceId, String field) {
+        String quality = ResponseSignals.quality(response);
+        if (quality.equals("BUSINESS_ERROR") || quality.equals("EMPTY_RESPONSE")
+                || quality.equals("CHALLENGE_PAGE") || quality.equals("PARKED_DOMAIN")
+                || quality.equals("APP_UPGRADE_REQUIRED"))
+            throw new SourceFailure(stage, sourceId, field,
+                    "Unusable source response: " + quality + " (HTTP " + response.status() + ")");
     }
 
     private static void requireIdentity(Source source, String sourceId) {
