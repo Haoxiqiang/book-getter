@@ -215,7 +215,9 @@ public final class RuleEvaluator {
         }
         matcher.appendTail(result);
         if (!hasDeferredPath) return result.toString();
-        return "function __bgGet(path) { var value = result; var keys = path.split('.'); "
+        return "function __bgGet(path) { var value = result; "
+                + "if (typeof value === 'string') { try { value = JSON.parse(value); } catch (ignored) {} } "
+                + "var keys = path.split('.'); "
                 + "for (var i = 0; i < keys.length; i++) { if (value == null) return ''; value = value[keys[i]]; } "
                 + "return value == null ? '' : value; }\n" + result;
     }

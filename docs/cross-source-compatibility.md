@@ -18,7 +18,7 @@
 | 轻小说机翻🤖 | 20 条 | 搜索到首章、整书下载链路已实测；但不能代表其他 10 源 |
 | 真白萌 | HTTP 403 | 登录/站点防护边界；不绕过访问控制 |
 | ESJ Zone | 有效 0 命中，本轮未超时 | 需用站内确定收录的作品与 Android 环境再测；追加的 `無職轉生`、`異世界` 探针超时，不能以本轮 0 条证明整源可用 |
-| 再漫画 | 修复默认规则后 10 条 | `@@` 内嵌规则、`class…@tag…` 连续选择器已加 Java 回归测试。首条详情 API 返回 HTTP 200 但 JSON `errno=2, errmsg=漫画不存在`，目录因而失败；站点链接变为 `/details/58227`，源中正则还按旧 `info.xxx.html` 提取 `comic_py`，属于上游规则失配，不能标成详情成功 |
+| 再漫画 | 修复默认规则后 10 条 | `@@` 内嵌规则、`class…@tag…` 连续选择器已加 Java 回归测试。首条详情 API 返回 HTTP 200 但 JSON `errno=2, errmsg=漫画不存在`，目录因而失败；站点链接变为 `/details/58227`，源中正则还按旧 `info.xxx.html` 提取 `comic_py`，属于上游规则失配，不能标成详情成功。其 `ruleBookInfo.init` 与 `ruleToc.isVolume` 机制现有离线回归，仍不能越过上游 URL 失配作真实端到端验证 |
 
 ## 静态规则特征与待补宿主
 
@@ -31,7 +31,9 @@
 | 编码/资源/加密 | `java.base64Encode/base64DecodeToByteArray/cacheFile/createSymmetricCrypto/queryTTF/replaceFont` | 先按实际书源样本和官方接口定契约，不把占位返回算实现 |
 | 辅助 | `java.log/toast/sleep/toURL/timeFormatUTC/t2s/put` | 副作用、时间、繁简转换及 URL 对象要逐项测；`t2s` 目前仍是原文占位 |
 
-书源规则字段还出现 `init`、`isVolume`、`isVip`、`payAction`、`replaceRegex`、`nextContentUrl`、`subContent`、`imageDecode` 等。当前 `SourceEngine` 未完整执行它们；例如再漫画的 `ruleBookInfo.init` 本应保存 `bid` 给目录章节 URL 使用，目录的 `isVolume` 应标注卷而非普通章节。100 本都来自同一个简单文本源，无法覆盖这些分支。
+书源规则字段还出现 `init`、`isVolume`、`isVip`、`payAction`、`replaceRegex`、`nextContentUrl`、`subContent`、`imageDecode` 等。当前 `SourceEngine` 只执行其中一部分；例如再漫画的 `ruleBookInfo.init` 保存 `bid` 给章节 URL 使用，目录的 `isVolume` 标注卷，这两个机制已补离线测试，但真实源仍被失效详情 URL 阻断。100 本都来自同一个简单文本源，无法覆盖这些分支。
+
+本轮根据官方 `BookInfo.kt` 与 `BookChapterList.kt` 补齐了详情 `init` 先于其他字段执行、目录 `isVolume/isVip` 判断及无 URL 卷标题的稳定占位 URL；官方 `String?.isTrue` 仅把空、`null`、`false/no/not/0/0.0` 判为假。合成的漫画 JSON 回归验证 `init` 保存 `bid` 后被章节 URL 使用，并验证卷与 VIP 标记。此为**机制单测通过**，不是再漫画真实站点通过；`isPay` 仍未进入当前 `Chapter` 模型。
 
 后续优先级：先让诊断区分请求/响应语义/规则字段；对 `@@`、默认选择器链、URL 后置 JS 建回归；接着实现受控 Cookie 与规则 JS 上下文，再在 Android 环境验证 WebView/登录。每次改动都以仓库内 Legado 官方实现核对；[上游 skill](../legadoSkill/README.md) 作为案例库，其部分章节对 `nextContentUrl` 的说法互相矛盾，不能直接当作规范。批量下载已按用户纠偏停止，已有 52 本离线有效文件保留在 Git 忽略目录中，100 本仅作为后续压力/整书验收，不替代跨站兼容测试。
 

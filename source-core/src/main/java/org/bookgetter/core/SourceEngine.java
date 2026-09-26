@@ -55,17 +55,21 @@ public final class SourceEngine {
         try {
             if (source.isJsSource()) return jsDetail(source, hit);
             FetchResponse response = fetch(requests.plan(hit.url(), source, "", 1, source.id()));
-            String name = field(source, "ruleBookInfo", "name", response.body(), response.url(), false);
-            String author = field(source, "ruleBookInfo", "author", response.body(), response.url(), false);
-            String intro = field(source, "ruleBookInfo", "intro", response.body(), response.url(), false);
-            String cover = field(source, "ruleBookInfo", "coverUrl", response.body(), response.url(), true);
-            String toc = field(source, "ruleBookInfo", "tocUrl", response.body(), response.url(), true);
+            Object detailContent = response.body();
+            String init = source.rule("ruleBookInfo", "init");
+            if (init != null && !init.isBlank())
+                detailContent = field(source, "ruleBookInfo", "init", detailContent, response.url(), false);
+            String name = field(source, "ruleBookInfo", "name", detailContent, response.url(), false);
+            String author = field(source, "ruleBookInfo", "author", detailContent, response.url(), false);
+            String intro = field(source, "ruleBookInfo", "intro", detailContent, response.url(), false);
+            String cover = field(source, "ruleBookInfo", "coverUrl", detailContent, response.url(), true);
+            String toc = field(source, "ruleBookInfo", "tocUrl", detailContent, response.url(), true);
             if (toc.isBlank()) toc = response.url();
             // An optional direct-download rule may only apply to one subtype of a mixed source.
             // Its failure must not hide an otherwise usable text book's catalog.
             String download = "";
             if (source.rule("ruleBookInfo", "downloadUrls") != null) {
-                try { download = field(source, "ruleBookInfo", "downloadUrls", response.body(), response.url(), true); }
+                try { download = field(source, "ruleBookInfo", "downloadUrls", detailContent, response.url(), true); }
                 catch (SourceFailure ignored) { /* no direct-download links for this item */ }
             }
             BookHit enriched = new BookHit(hit.sourceId(), hit.url(), name.isBlank() ? hit.name() : name,
@@ -90,8 +94,12 @@ public final class SourceEngine {
                 for (Object item : rules.many(source.rule("ruleToc", "chapterList"), response.body(), response.url(), source)) {
                     String title = field(source, "ruleToc", "chapterName", item, response.url(), false);
                     String url = field(source, "ruleToc", "chapterUrl", item, response.url(), true);
-                    if (!title.isBlank() && !url.isBlank() && chapterUrls.add(url))
-                        chapters.add(new Chapter(book.hit().url(), url, title, chapters.size(), false, false));
+                    if (title.isBlank()) continue;
+                    boolean volume = ruleTrue(field(source, "ruleToc", "isVolume", item, response.url(), false));
+                    boolean vip = ruleTrue(field(source, "ruleToc", "isVip", item, response.url(), false));
+                    if (url.isBlank()) url = volume ? title + chapters.size() : response.url();
+                    if (chapterUrls.add(url))
+                        chapters.add(new Chapter(book.hit().url(), url, title, chapters.size(), volume, vip));
                 }
                 page = field(source, "ruleToc", "nextTocUrl", response.body(), response.url(), true);
             }
@@ -189,6 +197,11 @@ public final class SourceEngine {
     }
 
     private static String orDefault(String value, String fallback) { return value.isBlank() ? fallback : value; }
+    /** Legado String?.isTrue: only explicit false/no/not/0/0.0 are false. */
+    private static boolean ruleTrue(String value) {
+        if (value == null || value.isBlank() || value.equals("null")) return false;
+        return !value.trim().matches("(?i)^(?:false|no|not|0|0\\.0)$");
+    }
     static boolean invalidContent(String text) {
         if (text == null) return true;
         String value = text.trim();

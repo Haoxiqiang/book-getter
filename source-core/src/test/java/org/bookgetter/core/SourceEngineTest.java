@@ -143,6 +143,32 @@ final class SourceEngineTest {
         assertEquals("searchUrl", failure.field);
     }
 
+    @Test void detailInitFeedsChapterUrlAndVolumeVipRules() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://comic.example","ruleBookInfo":{
+               "init":"@js:java.put('bid', `{{$.id}}`); result",
+               "name":"$.title","tocUrl":"@js:'/toc'"},
+             "ruleToc":{"chapterList":"$[*]","chapterName":"$.chapter_title",
+               "chapterUrl":"@js:result.isV ? '' : '/chapter/' + java.get('bid') + '/' + result.chapter_id",
+               "isVolume":"$.isV","isVip":"$.vip"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
+                request.url().endsWith("/toc")
+                        ? "[{\"chapter_title\":\"Volume\",\"isV\":true},{\"chapter_title\":\"One\",\"isV\":false,\"vip\":\"yes\",\"chapter_id\":7}]"
+                        : "{\"id\":42,\"title\":\"Comic\"}", 200, Map.of()));
+        BookHit hit = new BookHit(source.id(), "https://comic.example/book", "Search title", "", "", "", Kind.IMAGE);
+        BookDetail detail = engine.detail(source, hit);
+        assertEquals("Comic", detail.hit().name());
+        var chapters = engine.chapters(source, detail);
+        assertEquals(2, chapters.size());
+        assertTrue(chapters.get(0).volume());
+        assertFalse(chapters.get(0).vip());
+        assertEquals("Volume0", chapters.get(0).url());
+        assertFalse(chapters.get(1).volume());
+        assertTrue(chapters.get(1).vip());
+        assertEquals("https://comic.example/chapter/42/7", chapters.get(1).url());
+    }
+
     @Test void optionalJsDetailAndRelativeChapterUrls() {
         Source source = SourceImporter.parse("""
             {"bookSourceUrl":"https://example.test","mainJs":"function search(key,page){return [{bookUrl:'/book',name:'A'}]}\nfunction getChapters(book){return [{url:'chapter/1',title:'One',isVip:true}]}\nfunction getContent(chapter,book,nextChapterUrl){return java.ajax(chapter.url)}"}
