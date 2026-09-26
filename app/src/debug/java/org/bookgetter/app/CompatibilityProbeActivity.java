@@ -14,6 +14,7 @@ import org.bookgetter.core.Models.SourceFailure;
 import org.bookgetter.core.SourceEngine;
 import org.bookgetter.core.SourceImporter;
 import org.bookgetter.core.ResponseSignals;
+import org.bookgetter.core.RhinoRuntime;
 import org.bookgetter.core.Transport;
 import org.bookgetter.runtime.AndroidTransport;
 
@@ -27,6 +28,7 @@ public final class CompatibilityProbeActivity extends Activity {
         String sourceFilter = getIntent().getStringExtra("sourceFilter");
         String keyword = getIntent().getStringExtra("keyword");
         boolean captureFirst = getIntent().getBooleanExtra("captureFirst", false);
+        boolean catalogFirst = getIntent().getBooleanExtra("catalogFirst", false);
         int readableChapterIndex = getIntent().getIntExtra("chapterIndex", 0);
         long webViewDelayOverride = getIntent().getLongExtra("webViewDelayMillis", -1);
         if (catalogUrl == null || sourceFilter == null || keyword == null || readableChapterIndex < 0) {
@@ -69,7 +71,11 @@ public final class CompatibilityProbeActivity extends Activity {
                             + " length=" + body.length() + " quality=" + quality + " title=" + title));
                     return response;
                 };
-                SourceEngine engine = new SourceEngine(observed);
+                java.util.Set<String> warnedFields = new java.util.HashSet<>();
+                SourceEngine engine = new SourceEngine(observed, new RhinoRuntime(observed), diagnostic -> {
+                    if (warnedFields.add(diagnostic.field()))
+                        Log.w(TAG, clean("FIELD_WARNING " + diagnostic.field()));
+                });
                 Log.i(TAG, clean("START " + source.name() + " " + source.id() + " key=" + keyword));
                 int searchQualityStart = responseQualities.size();
                 List<BookHit> hits = engine.search(source, keyword, 1);
@@ -79,7 +85,7 @@ public final class CompatibilityProbeActivity extends Activity {
                         ? (suspectSearch ? "SEARCH_RESPONSE_SUSPECT" : "SEARCH_ZERO_UNVERIFIED") : "SEARCH_OK";
                 Log.i(TAG, clean(searchStatus
                         + " hits=" + hits.size() + (hits.isEmpty() ? "" : " first=" + hits.get(0).name())));
-                if (captureFirst && !hits.isEmpty()) {
+                if ((captureFirst || catalogFirst) && !hits.isEmpty()) {
                     int qualityStart = responseQualities.size();
                     BookDetail detail = engine.detail(source, hits.get(0));
                     boolean suspect = responseQualities.subList(qualityStart, responseQualities.size()).stream()
@@ -88,7 +94,9 @@ public final class CompatibilityProbeActivity extends Activity {
                     Log.i(TAG, (suspect ? "DETAIL_SUSPECT" : "DETAIL_OK")
                             + " tocPresent=" + (detail.tocUrl() != null && !detail.tocUrl().isBlank()));
                     List<Chapter> chapters = engine.chapters(source, detail);
-                    Log.i(TAG, clean("CATALOG_OK chapters=" + chapters.size()));
+                    Log.i(TAG, clean("CATALOG_OK chapters=" + chapters.size()
+                            + (chapters.isEmpty() ? "" : " firstUrl=" + chapters.get(0).url())));
+                    if (catalogFirst) return;
                     List<Chapter> readableChapters = chapters.stream().filter(chapter -> !chapter.volume()).toList();
                     if (readableChapterIndex >= readableChapters.size())
                         throw new IllegalArgumentException("Readable chapter index " + readableChapterIndex
@@ -111,7 +119,10 @@ public final class CompatibilityProbeActivity extends Activity {
             } catch (Exception error) {
                 SourceFailure failure = error instanceof SourceFailure value ? value : null;
                 String stage = failure == null ? "" : failure.stage + "." + failure.field + " ";
-                Log.e(TAG, clean("ERROR " + stage + error.getClass().getSimpleName() + ": " + error.getMessage()));
+                Throwable root = error;
+                while (root.getCause() != null) root = root.getCause();
+                Log.e(TAG, clean("ERROR " + stage + error.getClass().getSimpleName() + ": " + error.getMessage()
+                        + " cause=" + root.getClass().getSimpleName() + ": " + root.getMessage()), error);
             } finally {
                 runOnUiThread(this::finish);
             }

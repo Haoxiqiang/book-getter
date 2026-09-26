@@ -743,7 +743,69 @@ final class SourceEngineTest {
         RuleEvaluator evaluator = new RuleEvaluator(new RhinoRuntime(request -> new FetchResponse(request.url(), "", 200, Map.of())));
         String html = "<html><body><a href='/book'>Fixture</a><p>Code: 123</p></body></html>";
         assertEquals("Fixture", evaluator.one("@xpath://a", html, source.id(), source, false));
+        assertEquals("Code: 123", evaluator.one("//p[@class='note']/text()",
+                "<!doctype html><html><body><p class='note'>Code: 123</p></body></html>",
+                source.id(), source, false));
+        assertEquals("/book", evaluator.one("@XPath://a/@href", html, source.id(), source, false));
         assertEquals(List.of("123"), evaluator.many("@regex:\\d+", html, source.id(), source));
+    }
+
+    @Test void xpathCatalogKeepsSelectedElementsForChapterFields() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://xpath.test","bookSourceName":"xpath-catalog",
+             "ruleToc":{"chapterList":"//*[@id='list']//dt[2]/following-sibling::dd/a",
+                        "chapterName":"text","chapterUrl":"href"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(), """
+            <div id='list'><dt>Book</dt><dd><a href='/ignore'>Preface</a></dd>
+            <dt>Chapters</dt><dd><a href='one.html'>Chapter One</a></dd>
+            <dd><a href='/two.html'>Chapter Two</a></dd></div>
+            """, 200, Map.of()));
+        BookHit hit = new BookHit(source.id(), "https://xpath.test/book", "Fixture", "", "", "", Kind.TEXT);
+        List<Chapter> chapters = engine.chapters(source,
+                new BookDetail(hit, "https://xpath.test/book/catalog.html", List.of()));
+        assertEquals(2, chapters.size());
+        assertEquals("Chapter One", chapters.get(0).title());
+        assertEquals("https://xpath.test/book/one.html", chapters.get(0).url());
+        assertEquals("https://xpath.test/two.html", chapters.get(1).url());
+    }
+
+    @Test void malformedOptionalSearchFieldWarnsWithoutDroppingBooks() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://metadata.test","searchUrl":"/search?q={{key}}",
+             "ruleSearch":{"bookList":"$.data[*]","name":"$.name","bookUrl":"$.url",
+                           "wordCount":"{$.words}字"}}
+            """).sources().get(0);
+        java.util.ArrayList<Diagnostic> warnings = new java.util.ArrayList<>();
+        Transport transport = request -> new FetchResponse(request.url(), """
+            {"data":[{"name":"One","url":"/one","words":123},
+                     {"name":"Two","url":"/two","words":456}]}
+            """, 200, Map.of());
+        SourceEngine engine = new SourceEngine(transport, new RhinoRuntime(transport), warnings::add);
+        List<BookHit> hits = engine.search(source, "query", 1);
+        assertEquals(2, hits.size());
+        assertEquals("https://metadata.test/one", hits.get(0).url());
+        assertEquals("", hits.get(0).wordCount());
+        assertEquals(2, warnings.size());
+        assertEquals("ruleSearch.wordCount", warnings.get(0).field());
+        assertEquals("OPTIONAL_FIELD_ERROR", warnings.get(0).code());
+    }
+
+    @Test void xpathChapterHrefCanFeedEmbeddedJavaScript() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://chapter.test","ruleToc":{
+             "chapterList":"//li[span]/a","chapterName":"text",
+             "chapterUrl":"href<js>'https://api.chapter.test/content/'+result.match(/\\\\d+$/)[0]</js>"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(), """
+            <ul><li><span>Free</span><a href='/book/123'>Chapter One</a></li>
+            <li><a href='/book/456'>Not selected</a></li></ul>
+            """, 200, Map.of()));
+        BookHit hit = new BookHit(source.id(), "https://chapter.test/book", "Fixture", "", "", "", Kind.TEXT);
+        List<Chapter> chapters = engine.chapters(source,
+                new BookDetail(hit, "https://chapter.test/catalog", List.of()));
+        assertEquals(1, chapters.size());
+        assertEquals("https://api.chapter.test/content/123", chapters.get(0).url());
     }
 
     @Test void requestTemplateEvaluatesExpressionsAfterEs6Script() {

@@ -26,6 +26,7 @@ import java.util.zip.InflaterInputStream;
 import org.bookgetter.core.Models.BookHit;
 import org.bookgetter.core.Models.BookDetail;
 import org.bookgetter.core.Models.Chapter;
+import org.bookgetter.core.Models.Diagnostic;
 import org.bookgetter.core.Models.FetchRequest;
 import org.bookgetter.core.Models.FetchResponse;
 import org.bookgetter.core.Models.Source;
@@ -117,13 +118,17 @@ public final class LiveSourceProbe {
                 .forEach(source -> unique.putIfAbsent(source.id(), source));
         System.out.println("INVENTORY\tsnapshot=" + snapshot + "\tuniqueSources=" + unique.size());
         System.out.println("source\tkeyword\tstatus\thits\tfirstTitle\tdetail");
-        SourceEngine engine = new SourceEngine(transport);
+        List<Diagnostic> fieldWarnings = new ArrayList<>();
+        SourceEngine engine = new SourceEngine(transport, new RhinoRuntime(transport), fieldWarnings::add);
         for (Source source : unique.values()) {
             if (!matchesSource(source, sourceFilter)) continue;
             for (String keyword : queries) {
                 try {
+                    fieldWarnings.clear();
                     int qualityStart = responseQualities.size();
                     List<BookHit> hits = engine.search(source, keyword, 1);
+                    fieldWarnings.stream().map(Diagnostic::field).distinct().forEach(field ->
+                            System.out.println(row(source.name(), keyword, "FIELD_WARNING", "", "", field)));
                     String first = hits.isEmpty() ? "" : hits.get(0).name();
                     boolean suspectSearch = responseQualities.subList(qualityStart, responseQualities.size()).stream()
                             .anyMatch(ResponseSignals::suspectEmptySearch);

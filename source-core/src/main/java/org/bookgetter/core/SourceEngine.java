@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 import org.bookgetter.core.Models.*;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Element;
@@ -21,10 +22,15 @@ public final class SourceEngine {
     private final ScriptRuntime scripts;
     private final RequestPlanner requests;
     private final RuleEvaluator rules;
+    private final Consumer<Diagnostic> diagnostics;
 
     public SourceEngine(Transport transport) { this(transport, new RhinoRuntime(transport)); }
     public SourceEngine(Transport transport, ScriptRuntime scripts) {
-        this.transport = transport; this.scripts = scripts; requests = new RequestPlanner(scripts); rules = new RuleEvaluator(scripts);
+        this(transport, scripts, ignored -> {});
+    }
+    public SourceEngine(Transport transport, ScriptRuntime scripts, Consumer<Diagnostic> diagnostics) {
+        this.transport = transport; this.scripts = scripts; this.diagnostics = diagnostics;
+        requests = new RequestPlanner(scripts); rules = new RuleEvaluator(scripts);
     }
 
     public List<BookHit> search(Source source, String keyword, int page) {
@@ -44,11 +50,11 @@ public final class SourceEngine {
                 if (name.isBlank() || url.isBlank()) continue;
                 hits.add(new BookHit(source.id(), url, name,
                         field(source, "ruleSearch", "author", item, response.url(), false),
-                        field(source, "ruleSearch", "intro", item, response.url(), false),
-                        field(source, "ruleSearch", "coverUrl", item, response.url(), true), source.kind(),
-                        field(source, "ruleSearch", "kind", item, response.url(), false),
-                        field(source, "ruleSearch", "wordCount", item, response.url(), false),
-                        field(source, "ruleSearch", "lastChapter", item, response.url(), false)));
+                        optionalSearchField(source, "intro", item, response.url(), false),
+                        optionalSearchField(source, "coverUrl", item, response.url(), true), source.kind(),
+                        optionalSearchField(source, "kind", item, response.url(), false),
+                        optionalSearchField(source, "wordCount", item, response.url(), false),
+                        optionalSearchField(source, "lastChapter", item, response.url(), false)));
             }
             return hits;
         } catch (SourceFailure e) { throw e; }
@@ -287,6 +293,15 @@ public final class SourceEngine {
         String rule = source.rule(section, field);
         try { return rules.one(rule, input, base, source, url); }
         catch (Exception e) { throw new SourceFailure(stage(section), source.id(), section + "." + field, e.getMessage(), e); }
+    }
+
+    private String optionalSearchField(Source source, String name, Object input, String base, boolean url) {
+        try { return field(source, "ruleSearch", name, input, base, url); }
+        catch (SourceFailure e) {
+            diagnostics.accept(new Diagnostic(Stage.SEARCH, "OPTIONAL_FIELD_ERROR", e.getMessage(),
+                    Severity.WARNING, e.field));
+            return "";
+        }
     }
 
     private FetchResponse fetch(FetchRequest request) throws Exception {

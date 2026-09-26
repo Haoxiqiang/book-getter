@@ -87,14 +87,29 @@ public final class RuleEvaluator {
                 return List.of();
             }
         }
-        if (value.startsWith("@xpath:") || value.startsWith("//")) {
+        if (value.regionMatches(true, 0, "@xpath:", 0, 7) || value.startsWith("/")) {
             try {
                 // Most book-source XPath rules use unprefixed HTML names (e.g. //a).
                 // jsoup otherwise places HTML elements in the XHTML namespace, where //a matches nothing.
-                org.w3c.dom.Document document = new W3CDom().namespaceAware(false).fromJsoup(Jsoup.parse(input.toString(), baseUrl));
-                NodeList nodes = (NodeList) XPathFactory.newInstance().newXPath().evaluate(value.replaceFirst("^@xpath:", ""), document, XPathConstants.NODESET);
+                Element root = input instanceof Element element ? element.clone() : Jsoup.parse(input.toString(), baseUrl);
+                // Android's Harmony DocumentType has no owner document; jsoup's W3CDom
+                // cannot attach its source-node marker to that node on Android.
+                root.childNodes().stream().filter(node -> node instanceof org.jsoup.nodes.DocumentType)
+                        .toList().forEach(Node::remove);
+                org.w3c.dom.Document document = new W3CDom().namespaceAware(false).fromJsoup(root);
+                String path = value.regionMatches(true, 0, "@xpath:", 0, 7) ? value.substring(7) : value;
+                NodeList nodes = (NodeList) XPathFactory.newInstance().newXPath().evaluate(path, document, XPathConstants.NODESET);
                 List<Object> result = new ArrayList<>();
-                for (int i = 0; i < nodes.getLength(); i++) result.add(nodes.item(i).getTextContent());
+                for (int i = 0; i < nodes.getLength(); i++) {
+                    org.w3c.dom.Node node = nodes.item(i);
+                    Object original;
+                    try { original = node.getUserData(W3CDom.SourceProperty); }
+                    catch (NullPointerException ignored) {
+                        // Android Harmony DOM may have no owner document for a selected text node.
+                        original = null;
+                    }
+                    result.add(original instanceof Element ? original : node.getTextContent());
+                }
                 return result;
             } catch (Exception e) { throw new IllegalArgumentException("Invalid XPath rule: " + value, e); }
         }
@@ -144,6 +159,14 @@ public final class RuleEvaluator {
                 if (!trailing.startsWith("##")) throw new IllegalArgumentException("Unsupported rule after </js>: " + trailing);
                 text = replaceRule(text, trailing.split("##", -1)).trim();
             }
+            return url && !text.isBlank() ? absolute(baseUrl, text) : text;
+        }
+        int embeddedScript = value.indexOf("<js>");
+        if (embeddedScript > 0 && value.endsWith("</js>")) {
+            String initial = one(value.substring(0, embeddedScript).trim(), input, baseUrl, source, false);
+            Object evaluated = script.evaluate(value.substring(embeddedScript + 4, value.length() - 5),
+                    Map.of("result", initial, "baseUrl", baseUrl), source);
+            String text = evaluated == null ? "" : evaluated.toString().trim();
             return url && !text.isBlank() ? absolute(baseUrl, text) : text;
         }
         int chainedJs = value.indexOf("@js:");
@@ -196,7 +219,8 @@ public final class RuleEvaluator {
             return url && !result.isBlank() ? absolute(baseUrl, result) : result;
         }
         int actionAt = value.lastIndexOf('@');
-        boolean hasAction = actionAt > 0 && !value.startsWith("@json:") && !value.startsWith("@xpath:");
+        boolean hasAction = actionAt > 0 && !value.startsWith("@json:")
+                && !value.regionMatches(true, 0, "@xpath:", 0, 7) && !value.startsWith("/");
         String action = hasAction ? value.substring(actionAt + 1) : "text";
         String selector = hasAction ? value.substring(0, actionAt) : value;
         List<Object> items = selector.isBlank() ? List.of(input) : many(selector, input, baseUrl, source);
