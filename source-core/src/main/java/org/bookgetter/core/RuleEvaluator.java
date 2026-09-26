@@ -35,17 +35,17 @@ public final class RuleEvaluator {
             return normalize(script.evaluate(value.substring(chainedJs + 5), Map.of("result", initial.stream().map(Object::toString).toList(), "baseUrl", baseUrl), source));
         }
         if (value.startsWith("@js:")) return normalizeScript(script.evaluate(value.substring(4), Map.of("result", scriptInput(input), "baseUrl", baseUrl), source));
-        if (value.contains("||")) {
-            for (String alternative : value.split("\\|\\|")) {
-                try {
-                    List<Object> found = many(alternative.trim(), input, baseUrl, source);
-                    if (!found.isEmpty() && found.stream().anyMatch(item -> item != null && !item.toString().isBlank()))
-                        return found;
-                } catch (com.jayway.jsonpath.PathNotFoundException ignored) {
-                    // A missing JSON field is expected when trying the next alternative.
+        Combination combination = combination(value);
+        if (combination != null) {
+            List<List<Object>> branches = new ArrayList<>();
+            for (String part : combination.parts()) {
+                List<Object> found = many(part.trim(), input, baseUrl, source);
+                if (!found.isEmpty() && found.stream().anyMatch(item -> item != null && !item.toString().isBlank())) {
+                    branches.add(found);
+                    if (combination.operator().equals("||")) break;
                 }
             }
-            return List.of();
+            return merge(branches, combination.operator());
         }
         if (value.startsWith("@json:") || value.startsWith("$.") || value.startsWith("$[")) {
             String path = value.startsWith("@json:") ? value.substring(6) : value;
@@ -117,12 +117,18 @@ public final class RuleEvaluator {
             String text = expandTemplate(value, input, baseUrl, source).trim();
             return url && !text.isBlank() ? absolute(baseUrl, text) : text;
         }
-        if (value.contains("||")) {
-            for (String alternative : value.split("\\|\\|")) {
-                String found = one(alternative.trim(), input, baseUrl, source, url);
-                if (!found.isBlank()) return found;
+        Combination combination = combination(value);
+        if (combination != null) {
+            List<List<String>> branches = new ArrayList<>();
+            for (String part : combination.parts()) {
+                String found = one(part.trim(), input, baseUrl, source, url);
+                if (!found.isBlank()) {
+                    branches.add(List.of(found.split("\\n", -1)));
+                    if (combination.operator().equals("||")) break;
+                }
             }
-            return "";
+            String joined = String.join("\n", merge(branches, combination.operator()));
+            return combination.suffix().isEmpty() ? joined : replaceRule(joined, combination.suffix().split("##", -1)).trim();
         }
         String[] regex = value.split("##", -1);
         value = regex[0];
@@ -169,13 +175,66 @@ public final class RuleEvaluator {
 
     private static String replaceRule(String input, String[] ruleParts) {
         if (ruleParts[1].isEmpty()) return input;
-        Matcher matcher = Pattern.compile(ruleParts[1], Pattern.DOTALL).matcher(input);
+        Matcher matcher = Pattern.compile(ruleParts[1]).matcher(input);
         String replacement = ruleParts.length > 2 ? ruleParts[2] : "";
         if (ruleParts.length > 3) {
-            return matcher.find() ? Pattern.compile(ruleParts[1], Pattern.DOTALL)
+            return matcher.find() ? Pattern.compile(ruleParts[1])
                     .matcher(matcher.group()).replaceFirst(replacement) : "";
         }
         return matcher.replaceAll(replacement);
+    }
+
+    private record Combination(String operator, List<String> parts, String suffix) {}
+
+    /** Match Legado's top-level combination operators without splitting JSONPath filters or quoted selectors. */
+    private static Combination combination(String rule) {
+        List<Integer> operators = new ArrayList<>();
+        String operator = null;
+        int suffixAt = rule.length();
+        int square = 0, round = 0, curly = 0;
+        char quote = 0;
+        for (int i = 0; i + 1 < rule.length(); i++) {
+            char c = rule.charAt(i);
+            if (quote != 0) {
+                if (c == '\\') { i++; continue; }
+                if (c == quote) quote = 0;
+                continue;
+            }
+            if (c == '\'' || c == '"') { quote = c; continue; }
+            if (c == '\\') { i++; continue; }
+            if (c == '[') square++;
+            else if (c == ']') square--;
+            else if (c == '(') round++;
+            else if (c == ')') round--;
+            else if (c == '{') curly++;
+            else if (c == '}') curly--;
+            if (square != 0 || round != 0 || curly != 0) continue;
+            String pair = rule.substring(i, i + 2);
+            if (pair.equals("##")) { suffixAt = i; break; }
+            if (pair.equals("&&") || pair.equals("||") || pair.equals("%%")) {
+                if (operator == null) operator = pair;
+                if (pair.equals(operator)) operators.add(i);
+                i++;
+            }
+        }
+        if (operator == null) return null;
+        List<String> parts = new ArrayList<>();
+        int start = 0;
+        for (int at : operators) {
+            parts.add(rule.substring(start, at));
+            start = at + 2;
+        }
+        parts.add(rule.substring(start, suffixAt));
+        return new Combination(operator, parts, rule.substring(suffixAt));
+    }
+
+    private static <T> List<T> merge(List<List<T>> branches, String operator) {
+        List<T> merged = new ArrayList<>();
+        if (operator.equals("%%") && !branches.isEmpty()) {
+            for (int i = 0; i < branches.get(0).size(); i++)
+                for (List<T> branch : branches) if (i < branch.size()) merged.add(branch.get(i));
+        } else for (List<T> branch : branches) merged.addAll(branch);
+        return merged;
     }
 
     private static List<Object> normalize(Object value) {

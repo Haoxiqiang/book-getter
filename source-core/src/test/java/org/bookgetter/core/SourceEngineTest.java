@@ -133,6 +133,22 @@ final class SourceEngineTest {
         assertEquals("A的B", engine.content(source, book, chapter).text());
     }
 
+    @Test void contentReplacementRegexDoesNotConsumeFollowingLinesByDefault() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","ruleContent":{
+              "content":"div.content@html",
+              "replaceRegex":"##[（]本章未完.*[）]"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
+                "<div class='content'>开头（本章未完）<br>后续正文</div>", 200, Map.of()));
+        BookHit hit = new BookHit(source.id(), "https://example.test/book", "Book", "", "", "", Kind.TEXT);
+        BookDetail book = new BookDetail(hit, hit.url(), List.of());
+        Chapter chapter = new Chapter(hit.url(), "https://example.test/one", "One", 0, false, false);
+        String content = engine.content(source, book, chapter).text();
+        assertTrue(content.contains("后续正文"));
+        assertFalse(content.contains("本章未完"));
+    }
+
     @Test void directAttributeRuleReadsCurrentListElement() {
         Source source = SourceImporter.parse("""
             {"bookSourceUrl":"https://example.test","searchUrl":"/search",
@@ -374,6 +390,48 @@ final class SourceEngineTest {
         SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
                 "{\"items\":[{\"name\":\"Json Book\",\"url\":\"/book\"}]}", 200, Map.of()));
         assertEquals("https://api.example.test/book", engine.search(source, "json", 1).get(0).url());
+    }
+
+    @Test void jsonPathCombinedListHandlesTwoApiResponseShapes() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://api.example.test","searchUrl":"/search?key={{key}}",
+             "ruleSearch":{"bookList":"$..book_data[0]&&$.data[*]",
+               "name":"$.book_name","bookUrl":"/book/{{$.book_id}}"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
+                request.url().endsWith("key=first")
+                    ? "{\"rows\":[{\"book_data\":[{\"book_name\":\"First\",\"book_id\":1}]}]}"
+                    : "{\"data\":[{\"book_name\":\"Second\",\"book_id\":2}]}",
+                200, Map.of()));
+        assertEquals("First", engine.search(source, "first", 1).get(0).name());
+        assertEquals("Second", engine.search(source, "second", 1).get(0).name());
+    }
+
+    @Test void combinedRulesDoNotSplitJsonPathFilterOperators() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://api.example.test"}
+            """).sources().get(0);
+        RuleEvaluator evaluator = new RuleEvaluator(new RhinoRuntime(request ->
+                new FetchResponse(request.url(), "", 200, Map.of())));
+        String json = "{\"items\":[{\"name\":\"A\",\"enabled\":true,\"score\":2},"
+                + "{\"name\":\"B\",\"enabled\":false,\"score\":3}]}";
+        assertEquals(1, evaluator.many("$.items[?(@.enabled == true && @.score > 1)]", json, source.id(), source).size());
+    }
+
+    @Test void combinedHtmlFieldsAndInterleavedListsFollowLegadoOrder() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test"}
+            """).sources().get(0);
+        RuleEvaluator evaluator = new RuleEvaluator(new RhinoRuntime(request ->
+                new FetchResponse(request.url(), "", 200, Map.of())));
+        String html = "<div class='a'>A1</div><div class='a'>A2</div>"
+                + "<div class='b'>B1</div><div class='b'>B2</div>";
+        assertEquals("A1\nA2\nB1\nB2", evaluator.one("class.a@text&&class.b@text", html,
+                source.id(), source, false));
+        assertEquals("A1\nB1\nA2\nB2", evaluator.one("class.a@text%%class.b@text", html,
+                source.id(), source, false));
+        assertEquals(List.of("A1", "B1", "A2", "B2"), evaluator.many("class.a%%class.b", html,
+                source.id(), source).stream().map(item -> evaluator.one("text", item, source.id(), source, false)).toList());
     }
 
     @Test void multiSourceSearchKeepsFailuresSeparate() {

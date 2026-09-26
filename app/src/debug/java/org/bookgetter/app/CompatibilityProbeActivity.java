@@ -62,8 +62,14 @@ public final class CompatibilityProbeActivity extends Activity {
                 };
                 SourceEngine engine = new SourceEngine(observed);
                 Log.i(TAG, clean("START " + source.name() + " " + source.id() + " key=" + keyword));
+                int searchQualityStart = responseQualities.size();
                 List<BookHit> hits = engine.search(source, keyword, 1);
-                Log.i(TAG, clean((hits.isEmpty() ? "SEARCH_ZERO_UNVERIFIED" : "SEARCH_OK")
+                boolean suspectSearch = responseQualities.subList(searchQualityStart, responseQualities.size()).stream()
+                        .anyMatch(value -> value.equals("BUSINESS_ERROR") || value.equals("CHALLENGE_PAGE")
+                                || value.equals("PARKED_DOMAIN") || value.equals("UNRESOLVED_REDIRECT"));
+                String searchStatus = hits.isEmpty()
+                        ? (suspectSearch ? "SEARCH_RESPONSE_SUSPECT" : "SEARCH_ZERO_UNVERIFIED") : "SEARCH_OK";
+                Log.i(TAG, clean(searchStatus
                         + " hits=" + hits.size() + (hits.isEmpty() ? "" : " first=" + hits.get(0).name())));
                 if (captureFirst && !hits.isEmpty()) {
                     int qualityStart = responseQualities.size();

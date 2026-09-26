@@ -30,6 +30,12 @@ public final class ResponseSignals {
                             && object.get("errno").getAsInt() != 0
                             && (object.has("errmsg") || object.has("message")))
                         return "BUSINESS_ERROR";
+                    if (object.has("code") && object.get("code").isJsonPrimitive()
+                            && object.get("code").getAsJsonPrimitive().isNumber()
+                            && object.get("code").getAsInt() != 0 && object.get("code").getAsInt() != 200
+                            && object.has("data") && object.get("data").isJsonNull()
+                            && (object.has("message") || object.has("msg")))
+                        return "BUSINESS_ERROR";
                 }
             } catch (Exception ignored) { /* Not a complete JSON response. */ }
         }

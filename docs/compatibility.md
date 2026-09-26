@@ -8,7 +8,7 @@
 | 本地文件、剪贴板、URL 导入 | 已实现 | URL 由用户主动输入；无自动订阅更新 |
 | 单源及多源搜索 | 已实现 | 每源第 1 页；核心接口接受页码，UI 暂无翻页按钮；无匹配条目返回空结果 |
 | 详情、目录、正文 | 已实现基础链路 | 目录与正文下一页最多 50 页；传入目录中已知的下一章 URL 后，正文分页在其边界停止；不执行预更新脚本和付费动作 |
-| CSS、XPath、JSONPath、正则 | 基础子集 | 支持单段选取与 `@text/@html/@href` 等单动作；列表元素上可直接用 `text`、`href`、`src`；不保证 Legado 复合表达式等价 |
+| CSS、XPath、JSONPath、正则 | 基础子集 | 支持单段选取与 `@text/@html/@href` 等单动作；列表元素上可直接用 `text`、`href`、`src`；顶层 `&&/||/%%` 有合成回归且避开 JSONPath 过滤器内部运算符，但尚未证明所有混合模式和复杂后置替换等价；普通替换正则默认不跨行 |
 | 规则内 JS、`mainJs` | 基础子集 | Rhino 执行，支持部分 ES6、`jsLib`、`<js>` 和受控的 `java.ajax/get/put/timeFormatUTC`；`java.t2s` 仍是原文返回占位。`mainJs` 支持 search/getBookInfo/getChapters/getContent，`getBookInfo` 可省略；详情字段会合并到搜索结果。宿主对象和生命周期尚不等价于 Legado |
 | 手动登录、Cookie、WebView | 已实现基础链路 | HTTP 跳转链共享 Android Cookie；WebView 请求仅 GET，登录验证、WebJs、验证码处理未实现 |
 | TXT/EPUB 导出 | 已实现 | 仅文本章节；EPUB 是最小 EPUB 2，暂不含封面、插图或复杂排版 |

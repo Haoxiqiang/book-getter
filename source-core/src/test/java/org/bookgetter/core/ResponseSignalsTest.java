@@ -14,7 +14,9 @@ final class ResponseSignalsTest {
         assertEquals("PARKED_DOMAIN", quality(200, "<p>This domain may be for sale.</p>"));
         assertEquals("CHALLENGE_PAGE", quality(200, "<title>Just a moment...</title>"));
         assertEquals("BUSINESS_ERROR", quality(200, "{\"errno\":2,\"errmsg\":\"漫画不存在\",\"data\":{}}"));
+        assertEquals("BUSINESS_ERROR", quality(200, "{\"code\":100103,\"message\":\"PARAM_INVALID\",\"data\":null}"));
         assertEquals("UNCLASSIFIED", quality(200, "{\"errno\":0,\"data\":[]}"));
+        assertEquals("UNCLASSIFIED", quality(200, "{\"code\":0,\"message\":\"OK\",\"data\":null}"));
         assertEquals("UNCLASSIFIED", quality(200, "<html><title>搜索结果</title></html>"));
     }
 

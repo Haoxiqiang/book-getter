@@ -101,15 +101,20 @@ public final class LiveSourceProbe {
             if (!source.id().contains(sourceFilter) && !source.name().contains(sourceFilter)) continue;
             for (String keyword : queries) {
                 try {
+                    int qualityStart = responseQualities.size();
                     List<BookHit> hits = engine.search(source, keyword, 1);
                     String first = hits.isEmpty() ? "" : hits.get(0).name();
-                    System.out.println(row(source.name(), keyword, hits.isEmpty() ? "ZERO_UNVERIFIED" : "OK",
+                    boolean suspectSearch = responseQualities.subList(qualityStart, responseQualities.size()).stream()
+                            .anyMatch(value -> value.equals("BUSINESS_ERROR") || value.equals("CHALLENGE_PAGE")
+                                    || value.equals("PARKED_DOMAIN") || value.equals("UNRESOLVED_REDIRECT"));
+                    String status = hits.isEmpty() ? (suspectSearch ? "RESPONSE_SUSPECT" : "ZERO_UNVERIFIED") : "OK";
+                    System.out.println(row(source.name(), keyword, status,
                             Integer.toString(hits.size()), first, ""));
                     if (captureFirst && !hits.isEmpty()) {
                         try {
-                            int qualityStart = responseQualities.size();
+                            int detailQualityStart = responseQualities.size();
                             BookDetail detail = engine.detail(source, hits.get(0));
-                            boolean suspect = responseQualities.subList(qualityStart, responseQualities.size()).stream()
+                            boolean suspect = responseQualities.subList(detailQualityStart, responseQualities.size()).stream()
                                     .anyMatch(value -> value.equals("BUSINESS_ERROR") || value.equals("CHALLENGE_PAGE")
                                             || value.equals("PARKED_DOMAIN"));
                             System.out.println(row(source.name(), keyword, suspect ? "DETAIL_SUSPECT" : "DETAIL_OK",
