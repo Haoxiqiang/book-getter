@@ -9,6 +9,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 import org.bookgetter.core.Models.*;
 import org.mozilla.javascript.BaseFunction;
 import org.mozilla.javascript.ClassShutter;
@@ -21,9 +22,14 @@ import org.jsoup.nodes.Element;
 /** A narrow JS host. Unknown Legado java.* methods raise normal JS errors. */
 public final class RhinoRuntime implements ScriptRuntime {
     private final Transport transport;
+    private final Consumer<String> notification;
     private final Gson gson = new Gson();
     private final Map<String, Map<String, String>> sourceVariables = new ConcurrentHashMap<>();
-    public RhinoRuntime(Transport transport) { this.transport = transport; }
+    public RhinoRuntime(Transport transport) { this(transport, ignored -> {}); }
+    public RhinoRuntime(Transport transport, Consumer<String> notification) {
+        this.transport = transport;
+        this.notification = notification;
+    }
 
     @Override public Object evaluate(String script, Map<String, Object> bindings, Source source) {
         return run(script, bindings, source);
@@ -52,6 +58,19 @@ public final class RhinoRuntime implements ScriptRuntime {
             cx.setClassShutter(fullName -> false);
             ScriptableObject scope = cx.initSafeStandardObjects();
             Scriptable java = cx.newObject(scope);
+            BaseFunction notify = new BaseFunction() {
+                @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
+                    notification.accept(args.length == 0 ? "null" : Context.toString(args[0]));
+                    return Undefined.instance;
+                }
+            };
+            ScriptableObject.putProperty(java, "toast", notify);
+            ScriptableObject.putProperty(java, "longToast", notify);
+            ScriptableObject.putProperty(java, "startBrowserAwait", new BaseFunction() {
+                @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
+                    throw Context.reportRuntimeError("Interactive browser verification is unavailable in this runtime");
+                }
+            });
             Object[] ruleContent = {bindings.getOrDefault("result", "")};
             String ruleBaseUrl = String.valueOf(bindings.getOrDefault("baseUrl", source == null ? "" : source.id()));
             RuleEvaluator hostRules = new RuleEvaluator(this);

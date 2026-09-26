@@ -125,3 +125,5 @@ XPath 跨站规则复测：AOAOSTAR 128 集合的黑岩阅读公开 API 搜索 2
 另选 24 站分流搜索，其中多数停在 403、TLS/EOF 或非正常响应；可达源暴露两项通用缺口：磨铁的 URL 选项把 `headers` 存成 JSON 对象字符串，旧规划器在发请求前类型转换失败；现 JVM/Android 都能请求，API 此词为明确空列表。宜搜原始目录 API 有 839 条、776 条 `charge=1`，旧工程却因 `@put` 变量未随书传递、JS 引号中的 `{{$.字段}}` 未提前展开而把全部 URL 碰撞成 1 条；修复后 JVM/Android 均为 839 条、VIP 776 条。只验证到公开目录，不读取 `autoBuy=1` 的付费正文，也未新增下载。[源码依据、命令与阶段证据](header-and-search-item-variable-probe.md)。
 
 继续选两组共 24 条（含先前测过的旧源）逐站搜索，主要遇到 403、TLS/EOF 或证书错误。四三中文 HTTP 200 只含客户端 JS 跳转，全免小说 HTTP 200 是域名出售页；现均在搜索请求阶段明确拒绝，不再把 0 条当成有效规则结果。69书吧①的旧域 POST 经 301 到新域变 GET，仍只记入口漂移。没有抓正文或下载。[逐站与回归记录](client-redirect-and-parked-domain-probe.md)。
+
+换用更新时间较新的 XIU2 22 源补充集合，挑 13 个不同域名做单词搜索：阅友小说 `m.suixkan.com` 可从搜索 5 条走到详情、1649 章目录与单章，JVM/Android 均同数，公开目录链接独立计数亦为 1649；其余多数在 403/401/TLS/EOF 或有效零结果。四个源的 Cloudflare 分支调用 `java.longToast` 后等待 `startBrowserAwait` 人工验证；现 Java 宿主提示回调可测试，交互式验证缺口明确报出，不绕过访问控制。只读了一章，没有整书下载。[集合哈希、逐站与复测记录](xiu2-cross-site-probe.md)。

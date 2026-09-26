@@ -485,6 +485,19 @@ final class SourceEngineTest {
         assertEquals("keyword=book", observed.get().body());
     }
 
+    @Test void sourceNotificationsAreObservableAndInteractiveVerificationIsExplicit() {
+        Source source = SourceImporter.parse("{\"bookSourceUrl\":\"https://verify.test\"}").sources().get(0);
+        java.util.List<String> notifications = new java.util.ArrayList<>();
+        RhinoRuntime runtime = new RhinoRuntime(request ->
+                new FetchResponse(request.url(), "", 200, Map.of()), notifications::add);
+        assertEquals("done", runtime.evaluate("java.toast('short'); java.longToast('long'); 'done'",
+                Map.of(), source));
+        assertEquals(List.of("short", "long"), notifications);
+        RuntimeException failure = assertThrows(RuntimeException.class, () -> runtime.evaluate(
+                "java.startBrowserAwait('https://verify.test', 'Verify')", Map.of(), source));
+        assertTrue(failure.getMessage().contains("Interactive browser verification is unavailable"));
+    }
+
     @Test void signedUrlHostUsesUtf8Base64AndLowercaseMd5() {
         Source source = SourceImporter.parse("""
             {"bookSourceUrl":"https://signed.example","searchUrl":"/search?token={{java.md5Encode(java.base64Encode('abc'))}}"}
