@@ -40,7 +40,7 @@ public final class LiveSourceProbe {
 
     public static void main(String[] args) throws Exception {
         if (args.length < 2 || !(args[0].equals("--catalog") || args[0].equals("--json-url")))
-            throw new IllegalArgumentException("Usage: --catalog <catalog-directory> | --json-url <source-json-url> [--source name-or-url[,name-or-url...]] [--catalog-first | --capture-first] [queries...]");
+            throw new IllegalArgumentException("Usage: --catalog <catalog-directory> | --json-url <source-json-url> [--source name-or-url[,name-or-url...]] [--catalog-first | --capture-first] [--chapter-index nonnegative] [queries...]");
         int queryStart = 2;
         String sourceFilter = "";
         if (args.length >= 4 && args[2].equals("--source")) {
@@ -50,6 +50,13 @@ public final class LiveSourceProbe {
         boolean catalogFirst = args.length > queryStart && args[queryStart].equals("--catalog-first");
         boolean captureFirst = catalogFirst || (args.length > queryStart && args[queryStart].equals("--capture-first"));
         if (captureFirst) queryStart++;
+        int readableChapterIndex = 0;
+        if (args.length > queryStart + 1 && args[queryStart].equals("--chapter-index")) {
+            readableChapterIndex = Integer.parseInt(args[queryStart + 1]);
+            if (readableChapterIndex < 0) throw new IllegalArgumentException("Chapter index must be nonnegative");
+            captureFirst = true;
+            queryStart += 2;
+        }
         Path exportFirst = null;
         if (args.length > queryStart + 1 && args[queryStart].equals("--export-first")) {
             exportFirst = Path.of(args[queryStart + 1]);
@@ -133,10 +140,20 @@ public final class LiveSourceProbe {
                             System.out.println(row(source.name(), keyword, suspect ? "DETAIL_SUSPECT" : "DETAIL_OK",
                                     "", detail.hit().name(), detail.tocUrl() + " " + metadataFlags(detail.hit())));
                             List<Chapter> chapters = engine.chapters(source, detail);
+                            long readable = chapters.stream().filter(chapter -> !chapter.volume()).count();
+                            String firstReadableUrl = chapters.stream().filter(chapter -> !chapter.volume())
+                                    .findFirst().map(Chapter::url).orElse("");
                             System.out.println(row(source.name(), keyword, "CATALOG_OK", Integer.toString(chapters.size()), "",
-                                    chapters.isEmpty() ? "" : "firstUrl=" + chapters.get(0).url()));
+                                    chapters.isEmpty() ? "" : "readable=" + readable + " firstUrl=" + chapters.get(0).url()
+                                            + " firstReadableUrl=" + firstReadableUrl));
                             if (!chapters.isEmpty() && exportFirst == null && !catalogFirst) {
-                                Chapter firstChapter = chapters.stream().filter(chapter -> !chapter.volume()).findFirst().orElseThrow();
+                                List<Chapter> readableChapters = chapters.stream().filter(chapter -> !chapter.volume()).toList();
+                                if (readableChapterIndex >= readableChapters.size())
+                                    throw new IllegalArgumentException("Readable chapter index " + readableChapterIndex
+                                            + " exceeds " + readableChapters.size());
+                                Chapter firstChapter = readableChapters.get(readableChapterIndex);
+                                System.out.println(row(source.name(), keyword, "CONTENT_SELECTED",
+                                        Integer.toString(readableChapterIndex), firstChapter.title(), firstChapter.url()));
                                 int contentQualityStart = responseQualities.size();
                                 var content = engine.content(source, detail, firstChapter,
                                         SourceEngine.nextReadableUrl(chapters, firstChapter));
@@ -144,7 +161,8 @@ public final class LiveSourceProbe {
                                         .anyMatch(value -> value.equals("BUSINESS_ERROR") || value.equals("APP_UPGRADE_REQUIRED")
                                                 || value.equals("CHALLENGE_PAGE") || value.equals("PARKED_DOMAIN"));
                                 System.out.println(row(source.name(), keyword, suspectContent ? "CONTENT_SUSPECT" : "CONTENT_OK", "", "",
-                                        "characters=" + (content.text() == null ? 0 : content.text().length())
+                                        "rawCharacters=" + (content.text() == null ? 0 : content.text().length())
+                                                + " visibleCharacters=" + ResponseSignals.visibleCharacters(content.text())
                                                 + " resources=" + content.resources().size()));
                             }
                             if (exportFirst != null) {

@@ -10,6 +10,11 @@ import org.bookgetter.core.Models.FetchRequest;
 import org.junit.jupiter.api.Test;
 
 final class ResponseSignalsTest {
+    @Test void visibleCharacterCountExcludesMarkup() {
+        assertEquals(5, ResponseSignals.visibleCharacters("<div><b>Hello</b><script>ignored()</script></div>"));
+        assertEquals(0, ResponseSignals.visibleCharacters(null));
+    }
+
     @Test void crossHostAndAcceptedResponsesMakeEmptySearchUnverified() {
         FetchRequest request = new FetchRequest("https://old.example/search?q=book");
         FetchResponse migrated = new FetchResponse("https://new.example/", "<html>Home</html>", 200, Map.of());

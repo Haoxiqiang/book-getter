@@ -181,7 +181,9 @@ public final class RuleEvaluator {
         // Legado field rules may address the current list item directly, without a selector.
         if (value.equals("text") || value.equals("@text") || value.equals("html") || value.equals("@html")
                 || value.equals("ownText") || value.equals("@ownText") || value.equals("href")
-                || value.equals("@href") || value.equals("src") || value.equals("@src")) {
+                || value.equals("@href") || value.equals("src") || value.equals("@src")
+                || value.equals("textNodes") || value.equals("@textNodes")
+                || value.equals("all") || value.equals("@all")) {
             String action = value.startsWith("@") ? value.substring(1) : value;
             String result = input instanceof Element element ? elementValue(element, action) : input.toString();
             if (regex.length > 1) result = replaceRule(result, regex);
@@ -204,7 +206,7 @@ public final class RuleEvaluator {
                 strings.add(elementValue(element, action));
             } else strings.add(String.valueOf(item));
         }
-        String result = String.join("\n", strings);
+        String result = String.join(action.equals("all") ? "" : "\n", strings);
         if (regex.length > 1) result = replaceRule(result, regex);
         result = result.trim();
         return url && !result.isBlank() ? absolute(baseUrl, result) : result;
@@ -215,6 +217,9 @@ public final class RuleEvaluator {
             case "text" -> element.text();
             case "html" -> element.html();
             case "ownText" -> element.ownText();
+            case "textNodes" -> element.textNodes().stream().map(node -> node.text().trim())
+                    .filter(value -> !value.isEmpty()).collect(java.util.stream.Collectors.joining("\n"));
+            case "all" -> element.outerHtml();
             default -> element.attr(action);
         };
     }

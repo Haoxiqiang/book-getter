@@ -14,6 +14,10 @@ import org.bookgetter.core.Models.FetchResponse;
 public final class ResponseSignals {
     private ResponseSignals() {}
 
+    public static int visibleCharacters(String htmlOrText) {
+        return htmlOrText == null ? 0 : org.jsoup.Jsoup.parseBodyFragment(htmlOrText).text().length();
+    }
+
     /** Diagnostic hints only: a host migration or non-200 success does not prove a bad rule. */
     public static List<String> probeSignals(FetchRequest request, FetchResponse response) {
         List<String> signals = new ArrayList<>();

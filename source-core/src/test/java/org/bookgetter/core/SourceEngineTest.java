@@ -114,6 +114,22 @@ final class SourceEngineTest {
         assertEquals("https://example.test/one", chapters.get(0).url());
     }
 
+    @Test void directTextNodesAndAllMatchLegadoDomActions() {
+        Source source = SourceImporter.parse(sourceJson).sources().get(0);
+        RuleEvaluator rules = new RuleEvaluator(new RhinoRuntime(request ->
+                new FetchResponse(request.url(), "", 200, Map.of())));
+        String html = "<div class='content'>before<a href='/x'>link</a>after<br>line2</div>";
+        String base = "https://example.test/";
+        assertEquals("before\nafter\nline2", rules.one("class.content@textNodes", html, base, source, false));
+        Object item = rules.many("class.content", html, base, source).get(0);
+        assertEquals("before\nafter\nline2", rules.one("@textNodes", item, base, source, false));
+        String outer = rules.one("@css:div.content@all", html, base, source, false);
+        assertEquals(outer, rules.one("@all", item, base, source, false));
+        assertTrue(outer.startsWith("<div class=\"content\">"));
+        assertTrue(outer.contains("<a href=\"/x\">link</a>"));
+        assertTrue(outer.endsWith("</div>"));
+    }
+
     @Test void importSearchDetailCatalogContent() {
         Source source = SourceImporter.parse(sourceJson).sources().get(0);
         Transport transport = request -> {

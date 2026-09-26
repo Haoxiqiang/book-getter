@@ -29,6 +29,9 @@ tasks.register('liveSourceProbe', JavaExec) {
     } else if (project.hasProperty('probeCaptureFirst') && project.property('probeCaptureFirst').toString().toBoolean()) {
         args '--capture-first'
     }
+    if (project.hasProperty('probeChapterIndex')) {
+        args '--chapter-index', project.property('probeChapterIndex').toString()
+    }
     if (project.hasProperty('probeExportFirst')) {
         args '--export-first', rootProject.file(project.property('probeExportFirst').toString()).absolutePath
     }

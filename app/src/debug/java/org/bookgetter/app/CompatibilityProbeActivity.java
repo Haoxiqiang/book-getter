@@ -27,9 +27,10 @@ public final class CompatibilityProbeActivity extends Activity {
         String sourceFilter = getIntent().getStringExtra("sourceFilter");
         String keyword = getIntent().getStringExtra("keyword");
         boolean captureFirst = getIntent().getBooleanExtra("captureFirst", false);
+        int readableChapterIndex = getIntent().getIntExtra("chapterIndex", 0);
         long webViewDelayOverride = getIntent().getLongExtra("webViewDelayMillis", -1);
-        if (catalogUrl == null || sourceFilter == null || keyword == null) {
-            Log.e(TAG, "ARG_ERROR catalogUrl, sourceFilter and keyword are required");
+        if (catalogUrl == null || sourceFilter == null || keyword == null || readableChapterIndex < 0) {
+            Log.e(TAG, "ARG_ERROR catalogUrl, sourceFilter, keyword and nonnegative chapterIndex are required");
             finish();
             return;
         }
@@ -88,8 +89,13 @@ public final class CompatibilityProbeActivity extends Activity {
                             + " tocPresent=" + (detail.tocUrl() != null && !detail.tocUrl().isBlank()));
                     List<Chapter> chapters = engine.chapters(source, detail);
                     Log.i(TAG, clean("CATALOG_OK chapters=" + chapters.size()));
-                    Chapter first = chapters.stream().filter(chapter -> !chapter.volume()).findFirst().orElse(null);
+                    List<Chapter> readableChapters = chapters.stream().filter(chapter -> !chapter.volume()).toList();
+                    if (readableChapterIndex >= readableChapters.size())
+                        throw new IllegalArgumentException("Readable chapter index " + readableChapterIndex
+                                + " exceeds " + readableChapters.size());
+                    Chapter first = readableChapters.get(readableChapterIndex);
                     if (first != null) {
+                        Log.i(TAG, clean("CONTENT_SELECTED index=" + readableChapterIndex + " title=" + first.title()));
                         int contentQualityStart = responseQualities.size();
                         var content = engine.content(source, detail, first,
                                 SourceEngine.nextReadableUrl(chapters, first));
@@ -97,7 +103,8 @@ public final class CompatibilityProbeActivity extends Activity {
                                 .anyMatch(value -> value.equals("BUSINESS_ERROR") || value.equals("APP_UPGRADE_REQUIRED")
                                         || value.equals("CHALLENGE_PAGE") || value.equals("PARKED_DOMAIN"));
                         Log.i(TAG, clean((suspectContent ? "CONTENT_SUSPECT" : "CONTENT_OK")
-                                + " characters=" + (content.text() == null ? 0 : content.text().length())
+                                + " rawCharacters=" + (content.text() == null ? 0 : content.text().length())
+                                + " visibleCharacters=" + ResponseSignals.visibleCharacters(content.text())
                                 + " resources=" + content.resources().size()));
                     }
                 }
