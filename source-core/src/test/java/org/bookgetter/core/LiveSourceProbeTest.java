@@ -30,4 +30,11 @@ final class LiveSourceProbeTest {
         assertArrayEquals(json, LiveSourceProbe.decodeBody(buffer.toByteArray(), "gzip"));
         assertArrayEquals(json, LiveSourceProbe.decodeBody(json, "identity"));
     }
+
+    @Test void directBookProbeRequiresPublicHttpAddress() {
+        assertTrue(LiveSourceProbe.validHttpBookUrl("https://books.example/book/123"));
+        assertFalse(LiveSourceProbe.validHttpBookUrl("file:///tmp/book.html"));
+        assertFalse(LiveSourceProbe.validHttpBookUrl("https://user:pass@books.example/book/123"));
+        assertFalse(LiveSourceProbe.validHttpBookUrl("javascript:alert(1)"));
+    }
 }

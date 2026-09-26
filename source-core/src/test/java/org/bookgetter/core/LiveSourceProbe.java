@@ -41,7 +41,7 @@ public final class LiveSourceProbe {
 
     public static void main(String[] args) throws Exception {
         if (args.length < 2 || !(args[0].equals("--catalog") || args[0].equals("--json-url")))
-            throw new IllegalArgumentException("Usage: --catalog <catalog-directory> | --json-url <source-json-url> [--source name-or-url[,name-or-url...]] [--catalog-first | --capture-first] [--chapter-index nonnegative] [queries...]");
+            throw new IllegalArgumentException("Usage: --catalog <catalog-directory> | --json-url <source-json-url> [--source name-or-url[,name-or-url...]] [--catalog-first | --capture-first] [--chapter-index nonnegative] [--book-url detail-url] [queries...]");
         int queryStart = 2;
         String sourceFilter = "";
         if (args.length >= 4 && args[2].equals("--source")) {
@@ -64,7 +64,17 @@ public final class LiveSourceProbe {
             captureFirst = true;
             queryStart += 2;
         }
-        List<String> queries = args.length == queryStart ? List.of("诡秘之主", "无职转生")
+        String directBookUrl = null;
+        if (args.length > queryStart + 1 && args[queryStart].equals("--book-url")) {
+            directBookUrl = args[queryStart + 1];
+            if (!validHttpBookUrl(directBookUrl) || sourceFilter.isBlank())
+                throw new IllegalArgumentException("Direct book probe needs an HTTP(S) URL and a source filter");
+            if (!captureFirst) catalogFirst = true;
+            captureFirst = true;
+            queryStart += 2;
+        }
+        List<String> queries = directBookUrl != null ? List.of("DIRECT_BOOK")
+                : args.length == queryStart ? List.of("诡秘之主", "无职转生")
                 : List.of(args).subList(queryStart, args.length);
         CookieManager cookies = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
         HttpClient client = HttpClient.newBuilder().cookieHandler(cookies)
@@ -126,13 +136,16 @@ public final class LiveSourceProbe {
                 try {
                     fieldWarnings.clear();
                     int qualityStart = responseQualities.size();
-                    List<BookHit> hits = engine.search(source, keyword, 1);
+                    List<BookHit> hits = directBookUrl == null ? engine.search(source, keyword, 1)
+                            : List.of(new BookHit(source.id(), directBookUrl, directBookUrl,
+                                    "", "", "", source.kind()));
                     fieldWarnings.stream().map(Diagnostic::field).distinct().forEach(field ->
                             System.out.println(row(source.name(), keyword, "FIELD_WARNING", "", "", field)));
                     String first = hits.isEmpty() ? "" : hits.get(0).name();
                     boolean suspectSearch = responseQualities.subList(qualityStart, responseQualities.size()).stream()
                             .anyMatch(ResponseSignals::suspectEmptySearch);
-                    String status = hits.isEmpty() ? (suspectSearch ? "RESPONSE_SUSPECT" : "ZERO_UNVERIFIED") : "OK";
+                    String status = directBookUrl != null ? "SEARCH_SKIPPED_DIRECT_BOOK"
+                            : hits.isEmpty() ? (suspectSearch ? "RESPONSE_SUSPECT" : "ZERO_UNVERIFIED") : "OK";
                     System.out.println(row(source.name(), keyword, status,
                             Integer.toString(hits.size()), first, hits.isEmpty() ? "" : metadataFlags(hits.get(0))));
                     if (captureFirst && !hits.isEmpty()) {
@@ -146,10 +159,12 @@ public final class LiveSourceProbe {
                                     "", detail.hit().name(), detail.tocUrl() + " " + metadataFlags(detail.hit())));
                             List<Chapter> chapters = engine.chapters(source, detail);
                             long readable = chapters.stream().filter(chapter -> !chapter.volume()).count();
+                            long vip = chapters.stream().filter(Chapter::vip).count();
                             String firstReadableUrl = chapters.stream().filter(chapter -> !chapter.volume())
                                     .findFirst().map(Chapter::url).orElse("");
                             System.out.println(row(source.name(), keyword, "CATALOG_OK", Integer.toString(chapters.size()), "",
-                                    chapters.isEmpty() ? "" : "readable=" + readable + " firstUrl=" + chapters.get(0).url()
+                                    chapters.isEmpty() ? "" : "readable=" + readable + " vip=" + vip
+                                            + " firstUrl=" + chapters.get(0).url()
                                             + " firstReadableUrl=" + firstReadableUrl));
                             if (!chapters.isEmpty() && exportFirst == null && !catalogFirst) {
                                 List<Chapter> readableChapters = chapters.stream().filter(chapter -> !chapter.volume()).toList();
@@ -209,6 +224,14 @@ public final class LiveSourceProbe {
                 return true;
         }
         return false;
+    }
+
+    static boolean validHttpBookUrl(String value) {
+        try {
+            URI uri = URI.create(value);
+            return (uri.getScheme().equalsIgnoreCase("https") || uri.getScheme().equalsIgnoreCase("http"))
+                    && uri.getHost() != null && uri.getUserInfo() == null;
+        } catch (Exception ignored) { return false; }
     }
 
     private static String metadataFlags(BookHit hit) {

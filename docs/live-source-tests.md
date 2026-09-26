@@ -109,3 +109,5 @@
 对照官方 `@html` 语义后，补了外层节点返回及 script/style 清理。抖音小说同一首章：修复前 JVM 原始 1095/可见 927 字符，修复后 JVM 与 Android 均为原始 1169/可见 927 字符；搜索 20 条、详情与 112 章目录仍通过。仅单章验证，完整边界见[`@html` 探针](html-action-probe.md)，不增加整书数。
 
 XPath 跨站规则复测：AOAOSTAR 128 集合的黑岩阅读公开 API 搜索 20 条，坏 `wordCount` 规则仅报 `FIELD_WARNING`；首条近似命中详情与 2203 条目录在 JVM/Android 均通过，首章 URL 相同。修复项包括 XPath 列表保留节点、谓词 `@` 模式识别、`href<js>…</js>` 串联和 Android doctype 转 DOM。其他 XPath 站点在搜索阶段遇到 403/404/超时/非搜索页，未冒称跨站通过；本轮不读付费正文。证据与边界见[专项记录](xpath-and-optional-fields-probe.md)。
+
+追加目录标记核对：黑岩同页 `class="isvip name"` 链接 2156 个，JVM/Android `isVip` 均标记 2156/2203 条；只证明该公开页的标记数量一致。又以显式详情 URL 绕开“手机小说”的异常搜索页，详情 HTTP 200，但当前页使用 `id=list`（92 个 `<dd>`），补充书源 `ruleToc.chapterList` 仍寻找 `id=lbks`，目录 0 条。探针输出 `SEARCH_SKIPPED_DIRECT_BOOK`，此为上游规则漂移而非搜索通过；详见[XPath 专项记录](xpath-and-optional-fields-probe.md)。

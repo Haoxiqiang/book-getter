@@ -94,7 +94,9 @@ public final class CompatibilityProbeActivity extends Activity {
                     Log.i(TAG, (suspect ? "DETAIL_SUSPECT" : "DETAIL_OK")
                             + " tocPresent=" + (detail.tocUrl() != null && !detail.tocUrl().isBlank()));
                     List<Chapter> chapters = engine.chapters(source, detail);
+                    long vipCount = chapters.stream().filter(Chapter::vip).count();
                     Log.i(TAG, clean("CATALOG_OK chapters=" + chapters.size()
+                            + " vip=" + vipCount
                             + (chapters.isEmpty() ? "" : " firstUrl=" + chapters.get(0).url())));
                     if (catalogFirst) return;
                     List<Chapter> readableChapters = chapters.stream().filter(chapter -> !chapter.volume()).toList();

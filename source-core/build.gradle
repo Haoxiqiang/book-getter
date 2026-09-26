@@ -35,6 +35,9 @@ tasks.register('liveSourceProbe', JavaExec) {
     if (project.hasProperty('probeExportFirst')) {
         args '--export-first', rootProject.file(project.property('probeExportFirst').toString()).absolutePath
     }
+    if (project.hasProperty('probeBookUrl')) {
+        args '--book-url', project.property('probeBookUrl').toString()
+    }
     if (project.hasProperty('probeQueries')) {
         args project.property('probeQueries').toString().split(',').collect { it.trim() }
     }
