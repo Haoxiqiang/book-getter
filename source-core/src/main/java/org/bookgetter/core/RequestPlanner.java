@@ -3,6 +3,7 @@ package org.bookgetter.core;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.net.URLEncoder;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -25,11 +26,30 @@ public final class RequestPlanner {
         while (matcher.find()) matcher.appendReplacement(replaced, Matcher.quoteReplacement(String.valueOf(script.evaluate(matcher.group(1), bindings, source))));
         matcher.appendTail(replaced);
         text = replaced.toString();
-        Matcher placeholders = Pattern.compile("\\{\\{([^{}]+)}}").matcher(text);
+        int chainedJs = text.indexOf("\n@js:");
+        if (chainedJs >= 0) {
+            String initial = text.substring(0, chainedJs).trim();
+            Map<String, Object> withResult = new LinkedHashMap<>(bindings);
+            withResult.put("result", initial);
+            Object evaluated = script.evaluate(text.substring(chainedJs + 5), withResult, source);
+            text = evaluated == null ? "" : evaluated.toString();
+        }
+        Charset keywordCharset = StandardCharsets.UTF_8;
+        int preliminaryOptionStart = text.indexOf(",{");
+        if (preliminaryOptionStart >= 0) {
+            try {
+                JsonObject preliminaryOptions = JsonParser.parseString(text.substring(preliminaryOptionStart + 1)).getAsJsonObject();
+                String name = option(preliminaryOptions, "charset", null);
+                if (name != null && !name.isBlank()) keywordCharset = Charset.forName(name);
+            } catch (Exception ignored) { /* The final options parse reports malformed JSON. */ }
+        }
+        Matcher placeholders = Pattern.compile("\\{\\{([^{}]+)\\}\\}").matcher(text);
         StringBuffer expanded = new StringBuffer();
         while (placeholders.find()) {
             String expression = placeholders.group(1).trim();
-            Object evaluated = expression.equals("key") ? URLEncoder.encode(key, StandardCharsets.UTF_8)
+            Object evaluated = expression.equals("key") && (preliminaryOptionStart < 0 || placeholders.start() < preliminaryOptionStart)
+                    ? URLEncoder.encode(key, keywordCharset)
+                    : expression.equals("key") ? key
                     : expression.equals("page") ? page : script.evaluate(expression, bindings, source);
             String value = evaluated instanceof Number number && Double.isFinite(number.doubleValue())
                     && number.doubleValue() == Math.rint(number.doubleValue())

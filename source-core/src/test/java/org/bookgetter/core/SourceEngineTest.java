@@ -104,6 +104,45 @@ final class SourceEngineTest {
         assertEquals("https://example.test/book", hit.url());
     }
 
+    @Test void defaultRuleChainAndAtAtTemplateResolveCurrentElement() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://comic.example","searchUrl":"/search",
+             "ruleSearch":{"bookList":"class.update_con@tag.li","name":"class.title@text",
+               "bookUrl":"https://comic.example/api/detail/{{@@class.title@tag.a@href##.+info.(\\\\w+).html##$1}}"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
+                "<div class='update_con'><li><div class='title'><a href='/info.demo.html'>Comic</a></div></li></div>",
+                200, Map.of()));
+        BookHit hit = engine.search(source, "Comic", 1).get(0);
+        assertEquals("Comic", hit.name());
+        assertEquals("https://comic.example/api/detail/demo", hit.url());
+    }
+
+    @Test void requestOptionFollowedByJsKeepsUrlAndOptions() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","searchUrl":"/search?key={{key}},{\\n  \\"charset\\": \\"gbk\\"\\n}\\n@js:result"}
+            """).sources().get(0);
+        RequestPlanner planner = new RequestPlanner(new RhinoRuntime(request ->
+                new FetchResponse(request.url(), "", 200, Map.of())));
+        FetchRequest request = planner.plan(source.string("searchUrl"), source, "book", 1, source.id());
+        assertEquals("https://example.test/search?key=book", request.url());
+        assertEquals("gbk", request.charset());
+        FetchRequest chinese = planner.plan(source.string("searchUrl"), source, "无职", 1, source.id());
+        assertEquals("https://example.test/search?key="
+                + java.net.URLEncoder.encode("无职", java.nio.charset.Charset.forName("GBK")), chinese.url());
+    }
+
+    @Test void requestPlanningFailureIsAttributedToSearchUrl() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","searchUrl":"@js:missingHostMethod()"}
+            """).sources().get(0);
+        SourceFailure failure = assertThrows(SourceFailure.class,
+                () -> new SourceEngine(request -> new FetchResponse(request.url(), "", 200, Map.of()))
+                        .search(source, "book", 1));
+        assertEquals(Stage.SEARCH, failure.stage);
+        assertEquals("searchUrl", failure.field);
+    }
+
     @Test void optionalJsDetailAndRelativeChapterUrls() {
         Source source = SourceImporter.parse("""
             {"bookSourceUrl":"https://example.test","mainJs":"function search(key,page){return [{bookUrl:'/book',name:'A'}]}\nfunction getChapters(book){return [{url:'chapter/1',title:'One',isVip:true}]}\nfunction getContent(chapter,book,nextChapterUrl){return java.ajax(chapter.url)}"}

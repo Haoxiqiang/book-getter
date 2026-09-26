@@ -24,6 +24,7 @@ import org.bookgetter.core.Models.Chapter;
 import org.bookgetter.core.Models.FetchRequest;
 import org.bookgetter.core.Models.FetchResponse;
 import org.bookgetter.core.Models.Source;
+import org.bookgetter.core.Models.SourceFailure;
 import org.bookgetter.export.BookExporter;
 
 /** Manual, opt-in live probe. Never part of the deterministic unit-test task. */
@@ -101,12 +102,11 @@ public final class LiveSourceProbe {
                             }
                         } catch (Exception e) {
                             System.out.println(row(source.name(), keyword, "CAPTURE_ERROR", "", "",
-                                    e.getClass().getSimpleName() + ": " + e.getMessage()));
+                                    diagnostic(e)));
                         }
                     }
                 } catch (Exception e) {
-                    String detail = e.getClass().getSimpleName() + ": " + e.getMessage();
-                    System.out.println(row(source.name(), keyword, "ERROR", "", "", detail));
+                    System.out.println(row(source.name(), keyword, "ERROR", "", "", diagnostic(e)));
                 }
                 // Live sites may rate-limit or challenge clients; avoid a burst of requests.
                 Thread.sleep(1500);
@@ -138,5 +138,21 @@ public final class LiveSourceProbe {
         List<String> clean = new ArrayList<>();
         for (String column : columns) clean.add(column == null ? "" : column.replaceAll("[\\t\\r\\n]+", " "));
         return String.join("\t", clean);
+    }
+
+    private static String diagnostic(Throwable error) {
+        SourceFailure failure = null;
+        Throwable root = error;
+        for (Throwable current = error; current != null; current = current.getCause()) {
+            if (current instanceof SourceFailure sourceFailure) failure = sourceFailure;
+            root = current;
+        }
+        String stage = failure == null ? "" : failure.stage + "." + failure.field + " ";
+        StackTraceElement location = null;
+        for (StackTraceElement frame : root.getStackTrace()) {
+            if (frame.getClassName().startsWith("org.bookgetter.")) { location = frame; break; }
+        }
+        String where = location == null ? "" : " at " + location.getClassName() + ":" + location.getLineNumber();
+        return stage + root.getClass().getSimpleName() + ": " + root.getMessage() + where;
     }
 }

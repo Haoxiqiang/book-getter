@@ -29,7 +29,10 @@ public final class SourceEngine {
     public List<BookHit> search(Source source, String keyword, int page) {
         try {
             if (source.isJsSource()) return jsSearch(source, keyword, page);
-            FetchResponse response = fetch(requests.plan(source.string("searchUrl"), source, keyword, page, source.id()));
+            FetchResponse response;
+            try { response = fetch(requests.plan(source.string("searchUrl"), source, keyword, page, source.id())); }
+            catch (SourceFailure e) { throw e; }
+            catch (Exception e) { throw new SourceFailure(Stage.SEARCH, source.id(), "searchUrl", e.getMessage(), e); }
             String listRule = source.rule("ruleSearch", "bookList");
             List<Object> items = rules.many(listRule, response.body(), response.url(), source);
             List<BookHit> hits = new ArrayList<>();

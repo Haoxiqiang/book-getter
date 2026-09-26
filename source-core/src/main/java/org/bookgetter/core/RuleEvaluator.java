@@ -25,6 +25,7 @@ public final class RuleEvaluator {
     public List<Object> many(String rule, Object input, String baseUrl, Source source) {
         if (rule == null || rule.isBlank()) return List.of();
         String value = rule.trim();
+        if (value.startsWith("@@")) value = value.substring(2);
         if (value.startsWith("<js>") && value.endsWith("</js>"))
             return normalizeScript(script.evaluate(value.substring(4, value.length() - 5),
                     Map.of("result", scriptInput(input), "baseUrl", baseUrl), source));
@@ -71,9 +72,17 @@ public final class RuleEvaluator {
             while (matcher.find()) result.add(matcher.group());
             return result;
         }
-        String selector = value.replaceFirst("^@css:", "").split("@", 2)[0];
-        Element element = input instanceof Element e ? e : Jsoup.parse(input.toString(), baseUrl);
-        return new ArrayList<>(element.select(normalizeSelector(selector)));
+        if (!value.startsWith("@css:") && value.contains("@")) {
+            List<Object> current = List.of(input);
+            for (String part : value.split("@")) {
+                if (part.isBlank()) continue;
+                List<Object> next = new ArrayList<>();
+                for (Object item : current) next.addAll(select(item, part, baseUrl));
+                current = next;
+            }
+            return current;
+        }
+        return select(input, value.replaceFirst("^@css:", ""), baseUrl);
     }
 
     public String one(String rule, Object input, String baseUrl, Source source, boolean url) {
@@ -174,7 +183,7 @@ public final class RuleEvaluator {
     }
 
     private String expandTemplate(String template, Object input, String baseUrl, Source source) {
-        Matcher matcher = Pattern.compile("\\{\\{([^{}]+)}}").matcher(template);
+        Matcher matcher = Pattern.compile("\\{\\{([^{}]+)\\}\\}").matcher(template);
         StringBuffer result = new StringBuffer();
         while (matcher.find()) {
             String expression = matcher.group(1).trim();
@@ -188,7 +197,7 @@ public final class RuleEvaluator {
     }
 
     private String expandScriptTemplate(String template, Object input, String baseUrl, Source source) {
-        Matcher matcher = Pattern.compile("\\{\\{([^{}]+)}}").matcher(template);
+        Matcher matcher = Pattern.compile("\\{\\{([^{}]+)\\}\\}").matcher(template);
         StringBuffer result = new StringBuffer();
         boolean hasDeferredPath = false;
         while (matcher.find()) {
@@ -222,6 +231,12 @@ public final class RuleEvaluator {
         if (selector.startsWith("id.")) return "#" + selector.substring(3);
         if (selector.startsWith("tag.")) return selector.substring(4);
         return selector;
+    }
+
+    private static List<Object> select(Object input, String selector, String baseUrl) {
+        Element element = input instanceof Element e ? e : Jsoup.parse(input.toString(), baseUrl);
+        String normalized = normalizeSelector(selector);
+        return normalized.isBlank() ? List.of() : new ArrayList<>(element.select(normalized));
     }
 
     public static String absolute(String base, String path) {
