@@ -1,0 +1,11 @@
+{
+  "bookSourceUrl": "http://10.0.2.2:18765/node",
+  "bookSourceName": "Local DOM host fixture",
+  "bookSourceType": 0,
+  "searchUrl": "/node-search",
+  "ruleSearch": {
+    "bookList": "@js:var selected = java.getElement('li.book'); if (selected.first().select('a').attr('href') !== '/one') throw Error('node view missing'); java.getElements('li.book')",
+    "name": "a@text",
+    "bookUrl": "a@href"
+  }
+}

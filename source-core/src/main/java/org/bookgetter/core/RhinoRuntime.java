@@ -10,6 +10,8 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Base64;
+import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
@@ -17,6 +19,7 @@ import org.bookgetter.core.Models.*;
 import org.mozilla.javascript.BaseFunction;
 import org.mozilla.javascript.ClassShutter;
 import org.mozilla.javascript.Context;
+import org.mozilla.javascript.NativeArray;
 import org.mozilla.javascript.Scriptable;
 import org.mozilla.javascript.ScriptableObject;
 import org.mozilla.javascript.Undefined;
@@ -62,6 +65,7 @@ public final class RhinoRuntime implements ScriptRuntime {
             cx.setClassShutter(fullName -> false);
             ScriptableObject scope = cx.initSafeStandardObjects();
             Scriptable java = cx.newObject(scope);
+            IdentityHashMap<Scriptable, Object> nativeViews = new IdentityHashMap<>();
             BaseFunction notify = new BaseFunction() {
                 @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
                     notification.accept(args.length == 0 ? "null" : Context.toString(args[0]));
@@ -86,16 +90,23 @@ public final class RhinoRuntime implements ScriptRuntime {
                     return thisObj;
                 }
             });
-            BaseFunction getElements = new BaseFunction() {
+            ScriptableObject.putProperty(java, "getElement", new BaseFunction() {
                 @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
                     String rule = args.length == 0 ? "" : Context.toString(args[0]);
-                    Object[] elements = hostRules.many(rule, ruleContent[0], ruleBaseUrl, source).stream()
-                            .map(Object::toString).toArray();
-                    return context.newArray(scope, elements);
+                    Object found = hostRules.element(rule, ruleContent[0], ruleBaseUrl, source);
+                    if (found instanceof Element element) return elementsView(context, scope,
+                            new Elements(element), nativeViews);
+                    return ruleView(context, scope, found, nativeViews);
                 }
-            };
-            ScriptableObject.putProperty(java, "getElement", getElements);
-            ScriptableObject.putProperty(java, "getElements", getElements);
+            });
+            ScriptableObject.putProperty(java, "getElements", new BaseFunction() {
+                @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
+                    String rule = args.length == 0 ? "" : Context.toString(args[0]);
+                    List<Object> found = hostRules.many(rule, ruleContent[0], ruleBaseUrl, source);
+                    Object[] views = found.stream().map(item -> ruleView(context, scope, item, nativeViews)).toArray();
+                    return context.newArray(scope, views);
+                }
+            });
             ScriptableObject.putProperty(java, "getString", new BaseFunction() {
                 @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
                     String rule = args.length == 0 ? "" : Context.toString(args[0]);
@@ -211,7 +222,7 @@ public final class RhinoRuntime implements ScriptRuntime {
             });
             ScriptableObject.putProperty(scope, "java", java);
             if (source != null) {
-                bind(cx, scope, "source", source.json());
+                bind(cx, scope, "source", source.json(), nativeViews);
                 Scriptable sourceObject = (Scriptable) ScriptableObject.getProperty(scope, "source");
                 ScriptableObject.putProperty(sourceObject, "getLoginHeader", new BaseFunction() {
                     @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
@@ -221,7 +232,8 @@ public final class RhinoRuntime implements ScriptRuntime {
                 ScriptableObject.putProperty(sourceObject, "getVariable", emptyStringFunction());
                 ScriptableObject.putProperty(sourceObject, "key", source.id());
             }
-            for (Map.Entry<String, Object> binding : bindings.entrySet()) bind(cx, scope, binding.getKey(), binding.getValue());
+            for (Map.Entry<String, Object> binding : bindings.entrySet())
+                bind(cx, scope, binding.getKey(), binding.getValue(), nativeViews);
             if (!bindings.containsKey("book")) {
                 ScriptableObject.putProperty(scope, "book", cx.newObject(scope));
             }
@@ -233,6 +245,8 @@ public final class RhinoRuntime implements ScriptRuntime {
             Object result = cx.evaluateString(scope, code, "book-source", 1, null);
             if (result == null || result == Undefined.instance) return null;
             if (result instanceof String || result instanceof Number || result instanceof Boolean) return result;
+            Object preserved = nativeResult(result, nativeViews);
+            if (preserved != null) return preserved;
             ScriptableObject.putProperty(scope, "__bookGetterResult", result);
             Object json = cx.evaluateString(scope, "JSON.stringify(__bookGetterResult)", "result", 1, null);
             return json == Undefined.instance ? null : Context.toString(json);
@@ -296,9 +310,10 @@ public final class RhinoRuntime implements ScriptRuntime {
         return new RequestPlanner(this).plan(url, source, key, page, source.id());
     }
 
-    private void bind(Context cx, Scriptable scope, String name, Object value) {
+    private void bind(Context cx, Scriptable scope, String name, Object value,
+                      IdentityHashMap<Scriptable, Object> nativeViews) {
         if (value instanceof Element element) {
-            ScriptableObject.putProperty(scope, name, elementView(cx, scope, element));
+            ScriptableObject.putProperty(scope, name, elementView(cx, scope, element, nativeViews));
             return;
         }
         Object jsValue = cx.evaluateString(scope, "(" + gson.toJson(value) + ")", "binding:" + name, 1, null);
@@ -312,8 +327,40 @@ public final class RhinoRuntime implements ScriptRuntime {
         ScriptableObject.putProperty(scope, name, jsValue);
     }
 
-    private static Scriptable elementView(Context context, Scriptable scope, Element element) {
+    private static Object ruleView(Context context, Scriptable scope, Object value,
+                                   IdentityHashMap<Scriptable, Object> nativeViews) {
+        if (value instanceof Element element) return elementView(context, scope, element, nativeViews);
+        if (value instanceof List<?> list && list.stream().allMatch(Element.class::isInstance)) {
+            Elements elements = new Elements();
+            list.forEach(item -> elements.add((Element) item));
+            return elementsView(context, scope, elements, nativeViews);
+        }
+        if (value instanceof List<?> list)
+            return context.newArray(scope, list.stream().map(item -> ruleView(context, scope, item, nativeViews)).toArray());
+        if (value == null) return null;
+        if (value instanceof String || value instanceof Number || value instanceof Boolean) return value;
+        return value.toString();
+    }
+
+    private static Object nativeResult(Object value, IdentityHashMap<Scriptable, Object> nativeViews) {
+        if (!(value instanceof Scriptable scriptable)) return null;
+        if (nativeViews.containsKey(scriptable)) return nativeViews.get(scriptable);
+        if (scriptable instanceof NativeArray array) {
+            List<Object> found = new java.util.ArrayList<>();
+            for (int index = 0; index < array.getLength(); index++) {
+                Object item = array.get(index, array);
+                if (!(item instanceof Scriptable node) || !nativeViews.containsKey(node)) return null;
+                found.add(nativeViews.get(node));
+            }
+            return found;
+        }
+        return null;
+    }
+
+    private static Scriptable elementView(Context context, Scriptable scope, Element element,
+                                          IdentityHashMap<Scriptable, Object> nativeViews) {
         Scriptable view = context.newObject(scope);
+        nativeViews.put(view, element);
         ScriptableObject.putProperty(view, "attr", new BaseFunction() {
             @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
                 return element.attr(args.length == 0 ? "" : Context.toString(args[0]));
@@ -332,7 +379,7 @@ public final class RhinoRuntime implements ScriptRuntime {
         ScriptableObject.putProperty(view, "select", new BaseFunction() {
             @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
                 return elementsView(context, callScope,
-                        element.select(args.length == 0 ? "" : Context.toString(args[0])));
+                        element.select(args.length == 0 ? "" : Context.toString(args[0])), nativeViews);
             }
         });
         ScriptableObject.putProperty(view, "text", stringMethod(element::text));
@@ -343,8 +390,10 @@ public final class RhinoRuntime implements ScriptRuntime {
         return view;
     }
 
-    private static Scriptable elementsView(Context context, Scriptable scope, Elements elements) {
+    private static Scriptable elementsView(Context context, Scriptable scope, Elements elements,
+                                           IdentityHashMap<Scriptable, Object> nativeViews) {
         Scriptable view = context.newObject(scope);
+        nativeViews.put(view, elements);
         ((ScriptableObject) view).defineProperty("length", elements.size(),
                 ScriptableObject.READONLY | ScriptableObject.PERMANENT);
         ScriptableObject.putProperty(view, "size", new BaseFunction() {
@@ -360,13 +409,13 @@ public final class RhinoRuntime implements ScriptRuntime {
         ScriptableObject.putProperty(view, "select", new BaseFunction() {
             @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
                 return elementsView(context, callScope,
-                        elements.select(args.length == 0 ? "" : Context.toString(args[0])));
+                        elements.select(args.length == 0 ? "" : Context.toString(args[0])), nativeViews);
             }
         });
         ScriptableObject.putProperty(view, "first", new BaseFunction() {
             @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
                 Element first = elements.first();
-                return first == null ? null : elementView(context, callScope, first);
+                return first == null ? null : elementView(context, callScope, first, nativeViews);
             }
         });
         ScriptableObject.putProperty(view, "attr", new BaseFunction() {
@@ -375,6 +424,7 @@ public final class RhinoRuntime implements ScriptRuntime {
             }
         });
         ScriptableObject.putProperty(view, "text", stringMethod(elements::text));
+        ScriptableObject.putProperty(view, "html", stringMethod(elements::html));
         ScriptableObject.putProperty(view, "toString", stringMethod(elements::toString));
         return view;
     }

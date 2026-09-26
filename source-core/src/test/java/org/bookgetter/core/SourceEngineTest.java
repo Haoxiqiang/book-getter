@@ -651,6 +651,35 @@ final class SourceEngineTest {
         assertEquals("https://novel.example/two", hits.get(1).url());
     }
 
+    @Test void jsDomHostPreservesSafeNodeMethodsAndReturnedNodes() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://novel.example","searchUrl":"/search",
+             "ruleSearch":{"bookList":"@js:java.getElements('li.book')",
+               "name":"a@text","bookUrl":"a@href"}}
+            """).sources().get(0);
+        String html = "<ul><li class='book'><a href='/one'>One</a></li>"
+                + "<li class='book'><a href='/two'>Two</a></li></ul>";
+        RhinoRuntime runtime = new RhinoRuntime(request -> new FetchResponse(request.url(), html, 200, Map.of()));
+        assertEquals("/one", runtime.evaluate("java.getElement('li.book').first().select('a').attr('href')",
+                Map.of("result", html, "baseUrl", source.id()), source));
+        assertEquals("<a href=\"/one\">One</a>", runtime.evaluate("java.getElement('li.book.0').html()",
+                Map.of("result", html, "baseUrl", source.id()), source));
+        assertEquals("One|Two", runtime.evaluate("java.getElements('li.book').map(x => x.text()).join('|')",
+                Map.of("result", html, "baseUrl", source.id()), source));
+        Object returned = runtime.evaluate("java.getElements('li.book')",
+                Map.of("result", html, "baseUrl", source.id()), source);
+        assertTrue(returned instanceof List<?>);
+        assertTrue(((List<?>) returned).get(0) instanceof org.jsoup.nodes.Element);
+        Object first = runtime.evaluate("java.getElement('li.book').first()",
+                Map.of("result", html, "baseUrl", source.id()), source);
+        assertTrue(first instanceof org.jsoup.nodes.Element);
+        assertEquals(List.of("One", "Two"), new SourceEngine(request ->
+                new FetchResponse(request.url(), html, 200, Map.of())).search(source, "book", 1)
+                .stream().map(BookHit::name).toList());
+        assertEquals("undefined", runtime.evaluate("typeof java.getElement('li.book').getClass",
+                Map.of("result", html, "baseUrl", source.id()), source));
+    }
+
     @Test void inlineAttributeThenJsRuleFindsLiveStyleBookUrl() {
         Source source = SourceImporter.parse("""
             {"bookSourceUrl":"https://novel.example","searchUrl":"/search",
