@@ -43,6 +43,7 @@ public final class ResponseSignals {
     public static boolean suspectEmptySearch(String signal) {
         return signal.equals("BUSINESS_ERROR") || signal.equals("CHALLENGE_PAGE")
                 || signal.equals("PARKED_DOMAIN") || signal.equals("APP_UPGRADE_REQUIRED")
+                || signal.equals("CLIENT_SIDE_REDIRECT")
                 || signal.equals("PAGE_NOT_FOUND")
                 || signal.equals("UNRESOLVED_REDIRECT") || signal.equals("EMPTY_RESPONSE")
                 || signal.equals("CROSS_HOST_REDIRECT") || signal.equals("SEARCH_ENDPOINT_TO_ROOT")
@@ -61,7 +62,12 @@ public final class ResponseSignals {
         String body = response.body();
         if (body == null || body.isBlank()) return "EMPTY_RESPONSE";
         String lower = body.toLowerCase(Locale.ROOT);
-        if (lower.contains("domain may be for sale")) return "PARKED_DOMAIN";
+        if (lower.contains("domain may be for sale")
+                || lower.contains("] is for sale</h1>")
+                || (body.contains("域名 [") && body.contains("正在出售中"))) return "PARKED_DOMAIN";
+        if (body.length() < 1024 && lower.contains("<script")
+                && (lower.contains("window.location.href=") || lower.contains("window.location.replace(")))
+            return "CLIENT_SIDE_REDIRECT";
         if (lower.contains("<title>just a moment...") || lower.contains("cloudflare challenge")
                 || lower.contains("cf-chl-")) return "CHALLENGE_PAGE";
         if (lower.contains("<title>提示信息</title>") && body.contains("所访问的页面不存在"))

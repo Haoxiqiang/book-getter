@@ -44,6 +44,13 @@ final class ResponseSignalsTest {
         assertEquals("ACCESS_DENIED", quality(403, "blocked"));
         assertEquals("EMPTY_RESPONSE", quality(200, ""));
         assertEquals("PARKED_DOMAIN", quality(200, "<p>This domain may be for sale.</p>"));
+        assertEquals("PARKED_DOMAIN", quality(200,
+                "<html><title>example.test</title><h1>[example.test] is for sale</h1>"
+                        + "<h3>域名 [example.test] 正在出售中</h3></html>"));
+        assertEquals("CLIENT_SIDE_REDIRECT", quality(200,
+                "<!doctype html><html><head><script>window.onload=function(){"
+                        + "window.location.href=\"/lander?page=1\"}</script></head></html>"));
+        assertTrue(ResponseSignals.suspectEmptySearch("CLIENT_SIDE_REDIRECT"));
         assertEquals("CHALLENGE_PAGE", quality(200, "<title>Just a moment...</title>"));
         assertEquals("PAGE_NOT_FOUND", quality(200,
                 "<html><title>提示信息</title><body>所访问的页面不存在</body></html>"));
