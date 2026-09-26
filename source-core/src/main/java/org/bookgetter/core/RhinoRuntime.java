@@ -48,6 +48,35 @@ public final class RhinoRuntime implements ScriptRuntime {
             cx.setClassShutter(fullName -> false);
             ScriptableObject scope = cx.initSafeStandardObjects();
             Scriptable java = cx.newObject(scope);
+            Object[] ruleContent = {bindings.getOrDefault("result", "")};
+            String ruleBaseUrl = String.valueOf(bindings.getOrDefault("baseUrl", source == null ? "" : source.id()));
+            RuleEvaluator hostRules = new RuleEvaluator(this);
+            ScriptableObject.putProperty(java, "setContent", new BaseFunction() {
+                @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
+                    if (args.length == 0 || args[0] == null || args[0] == Undefined.instance)
+                        throw Context.reportRuntimeError("java.setContent requires non-null content");
+                    ruleContent[0] = Context.toString(args[0]);
+                    return thisObj;
+                }
+            });
+            BaseFunction getElements = new BaseFunction() {
+                @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
+                    String rule = args.length == 0 ? "" : Context.toString(args[0]);
+                    Object[] elements = hostRules.many(rule, ruleContent[0], ruleBaseUrl, source).stream()
+                            .map(Object::toString).toArray();
+                    return context.newArray(scope, elements);
+                }
+            };
+            ScriptableObject.putProperty(java, "getElement", getElements);
+            ScriptableObject.putProperty(java, "getElements", getElements);
+            ScriptableObject.putProperty(java, "getString", new BaseFunction() {
+                @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
+                    String rule = args.length == 0 ? "" : Context.toString(args[0]);
+                    Object input = args.length > 1 && args[1] != Undefined.instance
+                            ? Context.toString(args[1]) : ruleContent[0];
+                    return hostRules.one(rule, input, ruleBaseUrl, source, false);
+                }
+            });
             ScriptableObject.putProperty(java, "ajax", new BaseFunction() {
                 @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
                     String url = args.length == 0 ? "" : Context.toString(args[0]);

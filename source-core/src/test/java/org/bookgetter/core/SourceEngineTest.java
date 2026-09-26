@@ -118,6 +118,23 @@ final class SourceEngineTest {
         assertEquals("https://comic.example/api/detail/demo", hit.url());
     }
 
+    @Test void jsDomHostUsesCurrentResponseAndSetContent() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://novel.example","searchUrl":"/search",
+             "ruleSearch":{"bookList":"@js:java.getElement('class.results@tag.li')",
+               "name":"@js:java.setContent(result); java.getString('class.title@text')",
+               "bookUrl":"a@href"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
+                "<ul class='results'><li><a href='/one'><span class='title'>One</span></a></li>"
+                        + "<li><a href='/two'><span class='title'>Two</span></a></li></ul>",
+                200, Map.of()));
+        var hits = engine.search(source, "book", 1);
+        assertEquals(2, hits.size());
+        assertEquals("One", hits.get(0).name());
+        assertEquals("https://novel.example/two", hits.get(1).url());
+    }
+
     @Test void requestOptionFollowedByJsKeepsUrlAndOptions() {
         Source source = SourceImporter.parse("""
             {"bookSourceUrl":"https://example.test","searchUrl":"/search?key={{key}},{\\n  \\"charset\\": \\"gbk\\"\\n}\\n@js:result"}
@@ -152,6 +169,19 @@ final class SourceEngineTest {
                         .search(source, "book", 1));
         assertEquals(Stage.SEARCH, failure.stage);
         assertEquals("searchUrl", failure.field);
+    }
+
+    @Test void unresolvedRedirectCannotMasqueradeAsEmptySearch() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://novel.example","searchUrl":"/search",
+             "ruleSearch":{"bookList":"class.book@tag.li","name":"text","bookUrl":"a@href"}}
+            """).sources().get(0);
+        SourceFailure failure = assertThrows(SourceFailure.class,
+                () -> new SourceEngine(request -> new FetchResponse(request.url(), "", 302,
+                        Map.of("location", "http://parked.example"))).search(source, "book", 1));
+        assertEquals(Stage.SEARCH, failure.stage);
+        assertEquals("searchUrl", failure.field);
+        assertTrue(failure.getMessage().contains("Unresolved HTTP redirect 302"));
     }
 
     @Test void detailInitFeedsChapterUrlAndVolumeVipRules() {

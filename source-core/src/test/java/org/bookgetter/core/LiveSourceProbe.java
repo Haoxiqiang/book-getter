@@ -55,7 +55,29 @@ public final class LiveSourceProbe {
         CookieManager cookies = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
         HttpClient client = HttpClient.newBuilder().cookieHandler(cookies)
                 .followRedirects(HttpClient.Redirect.NORMAL).connectTimeout(Duration.ofSeconds(12)).build();
-        Transport transport = request -> fetch(client, request);
+        Transport transport = request -> {
+            FetchResponse response = fetch(client, request);
+            String body = response.body() == null ? "" : response.body();
+            String title = "";
+            Matcher titleMatch = Pattern.compile("(?is)<title[^>]*>(.*?)</title>").matcher(body);
+            if (titleMatch.find()) title = titleMatch.group(1).replaceAll("<[^>]*>", "");
+            String quality = response.status() >= 300 && response.status() < 400
+                    ? "UNRESOLVED_REDIRECT"
+                    : body.toLowerCase(java.util.Locale.ROOT).contains("domain may be for sale")
+                        ? "PARKED_DOMAIN" : "UNCLASSIFIED";
+            String host;
+            try { host = URI.create(response.url()).getHost(); }
+            catch (Exception ignored) { host = "invalid-url"; }
+            String redirectHost = "";
+            if (quality.equals("UNRESOLVED_REDIRECT")) {
+                String location = response.headers().getOrDefault("location", "");
+                try { redirectHost = URI.create(location).getHost(); }
+                catch (Exception ignored) { redirectHost = "invalid-url"; }
+            }
+            System.out.println(row("FETCH", host, Integer.toString(response.status()),
+                    Integer.toString(body.length()), title, quality + (redirectHost.isBlank() ? "" : " to=" + redirectHost)));
+            return response;
+        };
         Path catalog = Path.of(args[1]);
         String snapshot = Files.readString(catalog.resolve("CURRENT")).trim();
         Path uniqueFile = catalog.resolve("snapshots").resolve(snapshot).resolve("unique.json");
@@ -71,7 +93,8 @@ public final class LiveSourceProbe {
                 try {
                     List<BookHit> hits = engine.search(source, keyword, 1);
                     String first = hits.isEmpty() ? "" : hits.get(0).name();
-                    System.out.println(row(source.name(), keyword, "OK", Integer.toString(hits.size()), first, ""));
+                    System.out.println(row(source.name(), keyword, hits.isEmpty() ? "ZERO_UNVERIFIED" : "OK",
+                            Integer.toString(hits.size()), first, ""));
                     if (captureFirst && !hits.isEmpty()) {
                         try {
                             BookDetail detail = engine.detail(source, hits.get(0));

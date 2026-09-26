@@ -48,18 +48,21 @@ public final class CompatibilityProbeActivity extends Activity {
                     String title = "";
                     java.util.regex.Matcher titleMatch = java.util.regex.Pattern.compile("(?is)<title[^>]*>(.*?)</title>").matcher(body);
                     if (titleMatch.find()) title = titleMatch.group(1).replaceAll("<[^>]*>", "");
+                    String quality = body.toLowerCase(java.util.Locale.ROOT).contains("domain may be for sale")
+                            ? "PARKED_DOMAIN" : "UNCLASSIFIED";
                     String host;
                     try { host = new java.net.URI(response.url()).getHost(); }
                     catch (Exception ignored) { host = "invalid-url"; }
                     Log.i(TAG, clean("FETCH method=" + request.method() + " webView=" + request.webView()
                             + " status=" + response.status() + " host=" + host
-                            + " length=" + body.length() + " title=" + title));
+                            + " length=" + body.length() + " quality=" + quality + " title=" + title));
                     return response;
                 };
                 SourceEngine engine = new SourceEngine(observed);
                 Log.i(TAG, clean("START " + source.name() + " " + source.id() + " key=" + keyword));
                 List<BookHit> hits = engine.search(source, keyword, 1);
-                Log.i(TAG, clean("SEARCH_OK hits=" + hits.size() + (hits.isEmpty() ? "" : " first=" + hits.get(0).name())));
+                Log.i(TAG, clean((hits.isEmpty() ? "SEARCH_ZERO_UNVERIFIED" : "SEARCH_OK")
+                        + " hits=" + hits.size() + (hits.isEmpty() ? "" : " first=" + hits.get(0).name())));
                 if (captureFirst && !hits.isEmpty()) {
                     BookDetail detail = engine.detail(source, hits.get(0));
                     Log.i(TAG, "DETAIL_OK tocPresent=" + (detail.tocUrl() != null && !detail.tocUrl().isBlank()));

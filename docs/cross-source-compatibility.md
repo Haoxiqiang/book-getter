@@ -9,9 +9,9 @@
 | 书源 | 搜索阶段实测 | 当前归因和下一步 |
 | --- | --- | --- |
 | 哔哩轻小说🏷 | JS 对空正则结果取 `[1]` | 搜索前置脚本依赖站点 guard 接口；单独只读检查曾得 HTTP 403。先在有授权的浏览器/登录环境确认响应，再判断规则宿主差异 |
-| 哔哩轻小说•台 | JVM 需要 WebView；Android 搜索为 0 | 模拟器 WebView 对“无职转生”拿到 HTTP 200、标题 `Programmable Search Engine`，默认延时约 1 秒时 HTML 61,963 字符，额外延时 5 秒时 62,093 字符，均解析 0 条。单纯延长等待未解决；需检查 CSE 结果容器/站内索引与脚本加载状态，不能标为搜索兼容。该源的 `bookList` 还需 `java.setContent/getString` 宿主，命中时才能验证 |
+| 哔哩轻小说•台 | JVM 需要 WebView；Android 搜索为 0 | 模拟器 WebView 对“无职转生”拿到 HTTP 200、标题 `Programmable Search Engine`，默认延时约 1 秒时 HTML 61,963 字符，额外延时 5 秒时 62,093 字符，均解析 0 条。单纯延长等待未解决；需检查 CSE 结果容器/站内索引与脚本加载状态，不能标为搜索兼容。`java.setContent/getString` 现有最小 HTML 宿主，但该源无列表命中，尚未真实触发 |
 | 轻之文库轻小说 | JVM TLS 握手由远端终止；Android 连接被关闭 | 两种环境均在请求阶段失败，尚未进入该源复杂 `java.getElement`/AES 防护规则；需换正常授权网络复测，不能推断规则语法 |
-| 三七轻小说 | `java.getElement` 未提供 | 脚本宿主/DOM 元素对象模型缺口；源还有 `getString`、缓存文件、AES 与 Cookie 依赖，不能只补一个空壳方法 |
+| 三七轻小说 | JVM 未跟随 HTTPS→HTTP 的 302；Android HTTP 200 但只是域名出售页 | 已补 `java.getElement/getElements/getString/setContent` 的最小 HTML 宿主与离线回归，随后探针才暴露真实站点问题。JVM 搜索请求按探针 UA 跳到 `ww17.m.37yq.com` 的 HTTP 地址，不能再把空 302 算作零结果；Android 返回 975 字节、标题 `37yq.com` 的出售页，0 命中同样无效。复杂缓存/AES/Cookie 分支仍未被真实页面触发 |
 | 轻小说文库 | 修复 URL 选项后，暴露 `cookie` 未定义 | 之前的 `MalformedJsonException` 是请求尾部 `@js:` 被误当 JSON；已补语法单测。下一步是共享 Cookie 宿主及登录/GBK 编码验证；站点曾跳转后 HTTP 403 |
 | lk轻之国度 | `cookie.getKey` 缺失 | 搜索请求需用户 token 中的 `security_key`；未登录不能声称规则错误或零结果 |
 | rezero | 有效 0 命中 | 此站只收录 RE0 系，关键词不适用；用 `RE0` 已验证搜索 1 条、详情、887 章目录和首章 |
@@ -26,7 +26,7 @@
 
 | 类别 | 当前书源用到的调用 | 兼容测试方向 |
 | --- | --- | --- |
-| DOM/规则 | `java.getElement/getElements/getString/setContent` | JS 调用时应持有当前响应、URL、列表元素；返回值仍可被后续规则解析，需合成 HTML/JSON 夹具 |
+| DOM/规则 | `java.getElement/getElements/getString/setContent` | 已有 HTML 列表、`setContent`、字段提取的合成回归；当前只把元素作为 HTML 字符串数组暴露，尚非官方完整 `Elements`/对象模型，也未覆盖 JSON/正则 DOM 宿主组合 |
 | 网络与 Cookie | `java.ajax/get/post`、`cookie.getCookie/getKey/replaceCookie` | 同站与跳转 Cookie、请求头、GBK 表单、登录态；JVM 与 Android 分别验证 |
 | 编码/资源/加密 | `java.base64Encode/base64DecodeToByteArray/cacheFile/createSymmetricCrypto/queryTTF/replaceFont` | 先按实际书源样本和官方接口定契约，不把占位返回算实现 |
 | 辅助 | `java.log/toast/sleep/toURL/timeFormatUTC/t2s/put` | 副作用、时间、繁简转换及 URL 对象要逐项测；`t2s` 目前仍是原文占位 |
@@ -39,7 +39,7 @@
 
 ## 验证策略修正
 
-目标是尽量暴露**不同规则机制的失配**，而不是提高下载本数。每个书源优先挑站内可确认存在的作品，依次检查请求规划、响应语义、搜索列表、详情、目录、单章；只对已通过前一阶段的样本进入下一阶段。对 HTTP 200 但防护页、空壳页面、业务 `errno` 等情况单独归类，不能计作成功或“无作品”。无登录凭据的私有 API 记录为环境前提，不尝试绕过。每类修复至少加入一个脱网夹具回归，再用一个不同站点的同类规则交叉验证。
+目标是尽量暴露**不同规则机制的失配**，而不是提高下载本数。每个书源优先挑站内可确认存在的作品，依次检查请求规划、响应语义、搜索列表、详情、目录、单章；只对已通过前一阶段的样本进入下一阶段。对 HTTP 200 但防护页、空壳页面、业务 `errno` 等情况单独归类，不能计作成功或“无作品”。当前核心对传输层尚未解决的 3xx 报错，JVM/Android 探针的 0 命中均标作 `ZERO_UNVERIFIED`，诊断日志另标记域名出售页；不要把这个探针标记误当成通用防护页识别器。无登录凭据的私有 API 记录为环境前提，不尝试绕过。每类修复至少加入一个脱网夹具回归，再用一个不同站点的同类规则交叉验证。
 
 当前 11 源覆盖静态 HTML、动态 WebView、JSON API、JS 请求脚本、GBK/表单、登录 Cookie、字体/加密和漫画列表，但各类别并不均衡。后续若增加测试源，应从具有明确使用许可的独立来源补足 XPath、正则正文、多页目录、多页正文、POST 表单、正文图片与音频，而不是从当前 11 源重复抽相似书。新增源仍进入独立书源管理快照、按 URL 去重并保留来源与许可记录。
 
@@ -52,6 +52,7 @@ Android 调试包内提供 `CompatibilityProbeActivity`，可通过 `adb shell a
 | 哔哩轻小说•台 / 无职转生 | WebView 200；默认约 1 秒 HTML 61,963 字符，额外 5 秒 62,093 字符，Google CSE 标题 | 两次搜索均 0 | 延时并未产生规则匹配结果；尚未验证列表宿主或确认 CSE 是否索引该词 |
 | ESJ Zone / 無職轉生 | 请求超时 | 停在搜索请求 | 网络/站点可达性待复测 |
 | 轻之文库轻小说 / 无职转生 | Android `connection closed`，JVM 曾在 TLS 握手失败 | 停在搜索请求 | 两端均未进入复杂 JS 列表规则，不能算规则失败或空结果 |
+| 三七轻小说 / 无职转生 | JVM HTTP 302 到 HTTP 子域（未跟随），Android HTTP 200、975 字节域名出售页 | JVM 现报 `SEARCH.searchUrl` 未解决重定向；Android 表面 0 条 | 两种响应都不是书源搜索结果。`curl` 的普通 UA 可看到页面文案 `This domain may be for sale`；不要计作有效空结果 |
 | 轻小说机翻🤖 / 无职转生 | API 各阶段均 200 | 搜索 20、详情、目录 23、首章 7,945 字符 | Android 上 JSON/JS 路径的正对照；不据此推断其他书源 |
 | rezero / RE0 | 搜索经百度跳转，正文在站点自身，均 200 | 搜索 1、详情、目录 887、首章 1,979 字符 | Android 上跨域请求/静态 HTML 路径的正对照 |
 
