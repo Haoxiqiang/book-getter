@@ -139,3 +139,5 @@ XIU2 源再用宽词“修仙”验证酷我小说：先前“斗破苍穹”是
 后续按官方无自动跳转语义补了受控 `java.post` 与响应头读取。本地合成规则和实际 HTTP 302 均验证 POST 返回 `Location` 后才由搜索阶段 GET；起舞中文原始规则在 JVM/Android 均越过“方法不存在”，但 POST 与源站 TLS 握手被关闭，无法声称列表、目录或真实重定向通过。[源码依据、测试和真实边界](java-post-redirect-probe.md)。没有新增下载。
 
 经致文学改用站内确有详情的“故事”再测，搜索 2 条、首条详情和目录页均 HTTP 200；起初停在 `ruleToc.isVip` 的 `result.select('a').hasClass('isvip')` 宿主缺口。补安全 DOM 视图后 JVM/Android 均得 12 条目录、9 条 VIP；公开 HTML 独立计数也是 12 个不同章节链接、9 个 `isvip` 链接。此前“上门龙婿”的不存在详情仍是该词/该链接的规则漂移样本，不代表整源。[规则和逐阶段证据](dom-select-vip-probe.md)。未读付费章节或整书。
+
+晋江源的 `ruleToc.isPay` 暴露模型漏字段：按官方与该源原表达式补独立标记，合成 Java 与 Android 两章夹具均区分 `vip` 与 `isPay`。公开晋江目录 API 只读统计 105 项、VIP 90、`point=0` 15；但原源搜索 API 当前业务码 `1055`，且目录脚本含 Cookie/购买分支，因此未宣称原源目录通过，更未读付费正文。[边界与命令](is-pay-marker-probe.md)。

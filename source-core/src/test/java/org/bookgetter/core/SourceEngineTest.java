@@ -43,6 +43,8 @@ final class SourceEngineTest {
     }
 
     @Test void urlFieldUsesFirstMatchedDomAttributeInsteadOfJoiningMultipleLinks() {
+        assertEquals("http://example.test:18766/one",
+                RuleEvaluator.absolute("http://example.test:18766/catalog", "/one"));
         Source source = SourceImporter.parse("""
             {"bookSourceUrl":"https://example.test","bookSourceName":"links",
              "searchUrl":"/search?q={{key}}",
@@ -91,6 +93,29 @@ final class SourceEngineTest {
                 Map.of("result", node), source));
         assertEquals("undefined", runtime.evaluate("typeof result.select('a').getClass",
                 Map.of("result", node), source));
+    }
+
+    @Test void payMarkerIsIndependentFromVipAndSupportsChainedJsonPathJs() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","ruleToc":{
+              "chapterList":"$.chapterlist","chapterName":"$.chaptername",
+              "chapterUrl":"$.chapterurl","isVip":"$.isvip",
+              "isPay":"$..point<js>result!=0?false:true</js>"}}
+            """).sources().get(0);
+        Transport transport = request -> new FetchResponse(request.url(), """
+            {"chapterlist":[
+              {"chaptername":"Free","chapterurl":"/one","isvip":0,"point":0},
+              {"chaptername":"VIP","chapterurl":"/two","isvip":1,"point":5}]}
+            """, 200, Map.of());
+        BookHit hit = new BookHit(source.id(), "https://example.test/book", "Book", "", "", "", Kind.TEXT);
+        List<Chapter> chapters = new SourceEngine(transport)
+                .chapters(source, new BookDetail(hit, "https://example.test/catalog", List.of()));
+        assertEquals(2, chapters.size());
+        assertFalse(chapters.get(0).vip());
+        assertTrue(chapters.get(0).isPay());
+        assertTrue(chapters.get(1).vip());
+        assertFalse(chapters.get(1).isPay());
+        assertFalse(new Chapter(hit.url(), "https://example.test/three", "Legacy", 2, false, false).isPay());
     }
 
     @Test void embeddedScriptCanFeedJsonPathInListAndFieldRules() {
@@ -799,7 +824,7 @@ final class SourceEngineTest {
 
     @Test void optionalJsDetailAndRelativeChapterUrls() {
         Source source = SourceImporter.parse("""
-            {"bookSourceUrl":"https://example.test","mainJs":"function search(key,page){return [{bookUrl:'/book',name:'A'}]}\nfunction getChapters(book){return [{url:'chapter/1',title:'One',isVip:true}]}\nfunction getContent(chapter,book,nextChapterUrl){return java.ajax(chapter.url)}"}
+            {"bookSourceUrl":"https://example.test","mainJs":"function search(key,page){return [{bookUrl:'/book',name:'A'}]}\nfunction getChapters(book){return [{url:'chapter/1',title:'One',isVip:true,isPay:true}]}\nfunction getContent(chapter,book,nextChapterUrl){return java.ajax(chapter.url)}"}
             """).sources().get(0);
         SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(), "Chapter body", 200, Map.of()));
         BookHit hit = engine.search(source, "a", 1).get(0);
@@ -808,6 +833,7 @@ final class SourceEngineTest {
         Chapter chapter = engine.chapters(source, detail).get(0);
         assertEquals("https://example.test/chapter/1", chapter.url());
         assertTrue(chapter.vip());
+        assertTrue(chapter.isPay());
         assertEquals("Chapter body", engine.content(source, detail, chapter).text());
     }
 

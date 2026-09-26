@@ -166,11 +166,12 @@ public final class LiveSourceProbe {
                             long jsPlaceholders = chapters.stream().filter(chapter -> !chapter.volume()
                                     && ResponseSignals.javascriptPlaceholderUrl(chapter.url())).count();
                             long vip = chapters.stream().filter(Chapter::vip).count();
+                            long pay = chapters.stream().filter(Chapter::isPay).count();
                             String firstNonVolumeUrl = chapters.stream().filter(chapter -> !chapter.volume())
                                     .findFirst().map(Chapter::url).orElse("");
                             System.out.println(row(source.name(), keyword, "CATALOG_OK", Integer.toString(chapters.size()), "",
                                     chapters.isEmpty() ? "" : "nonVolume=" + nonVolume
-                                            + " javascriptPlaceholders=" + jsPlaceholders + " vip=" + vip
+                                            + " javascriptPlaceholders=" + jsPlaceholders + " vip=" + vip + " isPay=" + pay
                                             + " firstUrl=" + ResponseSignals.urlForLog(chapters.get(0).url())
                                             + " firstNonVolumeUrl=" + ResponseSignals.urlForLog(firstNonVolumeUrl)));
                             if (!chapters.isEmpty() && exportFirst == null && !catalogFirst) {

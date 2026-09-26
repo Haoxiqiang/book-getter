@@ -126,9 +126,10 @@ public final class SourceEngine {
                     if (title.isBlank()) continue;
                     boolean volume = ruleTrue(field(source, "ruleToc", "isVolume", item, response.url(), false));
                     boolean vip = ruleTrue(field(source, "ruleToc", "isVip", item, response.url(), false));
+                    boolean pay = ruleTrue(field(source, "ruleToc", "isPay", item, response.url(), false));
                     if (url.isBlank()) url = volume ? title + chapters.size() : response.url();
                     if (chapterUrls.add(url))
-                        chapters.add(new Chapter(book.hit().url(), url, title, chapters.size(), volume, vip));
+                        chapters.add(new Chapter(book.hit().url(), url, title, chapters.size(), volume, vip, pay));
                 }
                 page = field(source, "ruleToc", "nextTocUrl", response.body(), response.url(), true);
             }
@@ -269,8 +270,9 @@ public final class SourceEngine {
             if (title.isBlank() || url.isBlank()) continue;
             boolean volume = object.has("isVolume") && object.get("isVolume").getAsBoolean();
             boolean vip = object.has("isVip") && object.get("isVip").getAsBoolean();
+            boolean pay = object.has("isPay") && object.get("isPay").getAsBoolean();
             result.add(new Chapter(book.hit().url(), volume && url.equals(title) ? url : RuleEvaluator.absolute(book.tocUrl(), url),
-                    title, result.size(), volume, vip));
+                    title, result.size(), volume, vip, pay));
         }
         return result;
     }

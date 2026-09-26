@@ -30,6 +30,8 @@
 
 [DOM 节点 JS 专项](dom-select-vip-probe.md)补受控 `select/hasClass` 视图：经致文学换用有真实详情的“故事”后，JVM/Android 均到 12 条目录、VIP 9 条，分别与公开 HTML 的不同章节链接及 `isvip` 链接计数一致。它只证明这一目录规则，不代表 VIP 正文可读；百里中文当前搜索 HTTP 404，尚无第二站同类正对照。
 
+[`isPay` 标记专项](is-pay-marker-probe.md)将官方独立于 `isVip` 的目录布尔值保留到 Java `Chapter`；晋江原规则 `$..point<js>…</js>` 已由合成 Java 回归及 Android 本机两章夹具验证，公开 API 只读核对了 `point/isvip` 的字段分布。原晋江书源因搜索业务码、Cookie 与可购买脚本分支尚未跑到真实目录，不能把合成结果算成该源通过。诊断 URL 摘要现保留非默认端口，但仍隐藏查询和选项值。
+
 [XIU2 关键词/69 书吧专项](xiu2-keyword-and-69shuba-probe.md)提供另一条 JSON API 跨端正对照：酷我小说换用站内有结果的“修仙”后到 2052 项目录与单章，独立 API 计数一致；先前的 `data=[]` 只说明原词无结果。69书吧.com 的 `<js>` 本身不是合法 JS，另一条旧域 POST 跳转后变 GET，均不能为提高成功率而在核心里猜测修补。
 
 目前还未复刻原版的 `bookUrlPattern` 直达详情回退、完整变量作用域与优先级、跨源换源和批量正文。书籍变量、目录分卷与 VIP 标记仅有基础子集，遇到依赖其他层级或组合行为的书源，仍须用阶段错误和预检结果识别后再扩展。

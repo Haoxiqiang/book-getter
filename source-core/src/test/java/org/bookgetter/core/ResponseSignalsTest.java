@@ -25,6 +25,8 @@ final class ResponseSignalsTest {
     @Test void probeUrlLoggingOmitsQueriesAndInvalidObjectText() {
         assertEquals("https://example.test/chapter/1", ResponseSignals.urlForLog(
                 "https://example.test/chapter/1?token=secret#fragment"));
+        assertEquals("http://example.test:18766/chapter/1", ResponseSignals.urlForLog(
+                "http://example.test:18766/chapter/1?token=secret"));
         assertEquals("https://example.test/chapter/1 [options]", ResponseSignals.urlForLog(
                 "https://example.test/chapter/1,{\"headers\":{\"Authorization\":\"secret\"}}"));
         assertTrue(ResponseSignals.urlForLog("{links={reader=/chapter},abstract=private text}")

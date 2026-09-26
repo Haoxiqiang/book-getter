@@ -51,7 +51,12 @@ public final class Models {
         }
     }
     public record BookDetail(BookHit hit, String tocUrl, List<String> downloadUrls) {}
-    public record Chapter(String bookUrl, String url, String title, int index, boolean volume, boolean vip) {}
+    public record Chapter(String bookUrl, String url, String title, int index, boolean volume, boolean vip,
+                          boolean isPay) {
+        public Chapter(String bookUrl, String url, String title, int index, boolean volume, boolean vip) {
+            this(bookUrl, url, title, index, volume, vip, false);
+        }
+    }
     public record Resource(String url, String title, String mimeHint) {}
     public record ChapterContent(Chapter chapter, Kind kind, String text, List<Resource> resources) {}
     public record FetchRequest(String url, String method, Map<String, String> headers, String body, String charset,

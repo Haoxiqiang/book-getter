@@ -72,7 +72,9 @@ public final class ResponseSignals {
                 return "<invalid-url chars=" + value.length() + ">";
             String path = uri.getRawPath() == null ? "" : uri.getRawPath();
             if (path.length() > 120) path = path.substring(0, 120) + "…";
-            return uri.getScheme() + "://" + uri.getHost() + path + (optionAt < 0 ? "" : " [options]");
+            return uri.getScheme() + "://" + uri.getHost()
+                    + (uri.getPort() < 0 ? "" : ":" + uri.getPort())
+                    + path + (optionAt < 0 ? "" : " [options]");
         } catch (Exception ignored) {
             return "<invalid-url chars=" + value.length() + ">";
         }
