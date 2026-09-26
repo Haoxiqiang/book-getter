@@ -77,6 +77,14 @@ final class ResponseSignalsTest {
         assertEquals("BUSINESS_ERROR", quality(200, "{\"code\":4004,\"msg\":\"missing fields\",\"data\":[]}"));
         assertEquals("LOGIN_REQUIRED", quality(200,
                 "{\"ret\":303,\"needLogin\":true,\"loginUrl\":\"https://example.test/login\"}"));
+        assertEquals("LOGIN_REQUIRED", ResponseSignals.quality(new FetchResponse(
+                "https://example.test/user/login?from=search",
+                "<html><title>登录 - 百合会</title><form><input type='password'></form></html>",
+                200, Map.of())));
+        assertEquals("UNCLASSIFIED", ResponseSignals.quality(new FetchResponse(
+                "https://example.test/user/login", "<title>Search results</title>", 200, Map.of())));
+        assertEquals("UNCLASSIFIED", ResponseSignals.quality(new FetchResponse(
+                "https://example.test/books/login-guide", "<title>登录指南</title>", 200, Map.of())));
         assertTrue(ResponseSignals.suspectEmptySearch("LOGIN_REQUIRED"));
         assertEquals("UNCLASSIFIED", quality(200, "{\"errno\":0,\"data\":[]}"));
         assertEquals("UNCLASSIFIED", quality(200, "{\"code\":0,\"message\":\"OK\",\"data\":null}"));

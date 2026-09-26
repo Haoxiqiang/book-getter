@@ -24,6 +24,8 @@
 
 [跨站混合规则探针](mixed-js-jsonpath-probe.md)已验证 `<js>→JSONPath`、`{$.字段}` 内嵌值、JSON Map 动作回退及受控 JS Map 字符串视图：长佩、豆瓣阅读、猫耳 FM 在 JVM/Android 均到目录；52书库在 JVM 到目录。豆瓣 50 条目录与公开 API 同数，VIP 33 与 `price>0` 同数，但未取付费正文；猫耳只验证 6 条音频目录，不代表媒体可播放。喜马拉雅的 HTTP 200 `needLogin=true` 现报 `LOGIN_REQUIRED`，不会算搜索零结果。日志只展示去查询/选项值的 URL 摘要，避免错误规则把页面内容带进日志。
 
+[异构机制广度探针](aoaostar-mechanism-breadth-probe.md)再选 10 个不同站点：POPO 在 JVM/Android 搜索 10 条且首条详情通过，但原规则寻找“章回列表”、现页面只有“章回”链接，目录阶段停在上游规则漂移；百合会搜索被重定向到 HTTP 200 登录页，现两端均明确报 `LOGIN_REQUIRED`，不再伪装成零命中。其余 XPath、GBK POST、图片/文件候选多在跳转、403、TLS 或超时阶段受阻，仍不能称相关规则兼容。
+
 [XIU2 关键词/69 书吧专项](xiu2-keyword-and-69shuba-probe.md)提供另一条 JSON API 跨端正对照：酷我小说换用站内有结果的“修仙”后到 2052 项目录与单章，独立 API 计数一致；先前的 `data=[]` 只说明原词无结果。69书吧.com 的 `<js>` 本身不是合法 JS，另一条旧域 POST 跳转后变 GET，均不能为提高成功率而在核心里猜测修补。
 
 目前还未复刻原版的 `bookUrlPattern` 直达详情回退、完整变量作用域与优先级、跨源换源和批量正文。书籍变量、目录分卷与 VIP 标记仅有基础子集，遇到依赖其他层级或组合行为的书源，仍须用阶段错误和预检结果识别后再扩展。

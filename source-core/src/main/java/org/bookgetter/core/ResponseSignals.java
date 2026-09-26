@@ -93,6 +93,7 @@ public final class ResponseSignals {
             return "CLIENT_SIDE_REDIRECT";
         if (lower.contains("<title>just a moment...") || lower.contains("cloudflare challenge")
                 || lower.contains("cf-chl-")) return "CHALLENGE_PAGE";
+        if (loginLandingPage(response.url(), body)) return "LOGIN_REQUIRED";
         if (lower.contains("<title>提示信息</title>") && body.contains("所访问的页面不存在"))
             return "PAGE_NOT_FOUND";
         if (body.contains("当前版本过低") && body.contains("请升级到最新版")) return "APP_UPGRADE_REQUIRED";
@@ -131,5 +132,18 @@ public final class ResponseSignals {
 
     private static boolean upgradeNotice(String value) {
         return value.contains("当前版本过低") && value.contains("请升级到最新版");
+    }
+
+    private static boolean loginLandingPage(String url, String body) {
+        try {
+            String path = URI.create(url).getPath();
+            if (path == null || !path.toLowerCase(Locale.ROOT).matches(".*/(?:login|signin|sign-in)/?"))
+                return false;
+            String title = org.jsoup.Jsoup.parse(body).title().toLowerCase(Locale.ROOT);
+            return title.contains("登录") || title.contains("登錄") || title.contains("登陆")
+                    || title.contains("sign in") || title.contains("log in");
+        } catch (IllegalArgumentException ignored) {
+            return false;
+        }
     }
 }

@@ -311,8 +311,11 @@ public final class SourceEngine {
     private FetchResponse fetch(FetchRequest request) throws Exception {
         FetchResponse response = transport.fetch(request);
         if (response.status() >= 300 && response.status() < 400)
-            throw new IllegalStateException("Unresolved HTTP redirect " + response.status() + " at " + request.url());
-        if (response.status() >= 400) throw new IllegalStateException("HTTP " + response.status() + " at " + request.url());
+            throw new IllegalStateException("Unresolved HTTP redirect " + response.status() + " at "
+                    + ResponseSignals.urlForLog(request.url()));
+        if (response.status() >= 400)
+            throw new IllegalStateException("HTTP " + response.status() + " at "
+                    + ResponseSignals.urlForLog(request.url()));
         return response;
     }
 

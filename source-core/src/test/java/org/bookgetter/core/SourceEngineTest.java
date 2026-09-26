@@ -242,6 +242,24 @@ final class SourceEngineTest {
         assertEquals("searchUrl", failure.field);
     }
 
+    @Test void redirectedLoginPageIsNotAnEmptySearchResult() {
+        Source source = SourceImporter.parse(sourceJson).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(
+                "https://example.test/user/login", "<title>登录 - 示例站</title>", 200, Map.of()));
+        SourceFailure failure = assertThrows(SourceFailure.class, () -> engine.search(source, "book", 1));
+        assertEquals(Stage.SEARCH, failure.stage);
+        assertEquals("searchUrl", failure.field);
+        assertTrue(failure.getMessage().contains("LOGIN_REQUIRED"));
+    }
+
+    @Test void failedHttpRequestDoesNotExposeSearchQueryInError() {
+        Source source = SourceImporter.parse(sourceJson).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(), "", 403, Map.of()));
+        SourceFailure failure = assertThrows(SourceFailure.class, () -> engine.search(source, "secret-query", 1));
+        assertTrue(failure.getMessage().contains("https://example.test/search"));
+        assertFalse(failure.getMessage().contains("secret-query"));
+    }
+
     @Test void http200MissingDetailPageFailsBeforeCatalogRules() {
         Source source = SourceImporter.parse(sourceJson).sources().get(0);
         SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
