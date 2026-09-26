@@ -215,7 +215,11 @@ public final class RuleEvaluator {
     private static String elementValue(Element element, String action) {
         return switch (action) {
             case "text" -> element.text();
-            case "html" -> element.html();
+            case "html" -> {
+                Element clean = element.clone();
+                clean.select("script,style").remove();
+                yield clean.outerHtml();
+            }
             case "ownText" -> element.ownText();
             case "textNodes" -> element.textNodes().stream().map(node -> node.text().trim())
                     .filter(value -> !value.isEmpty()).collect(java.util.stream.Collectors.joining("\n"));

@@ -130,6 +130,21 @@ final class SourceEngineTest {
         assertTrue(outer.endsWith("</div>"));
     }
 
+    @Test void htmlActionKeepsWrapperButRemovesScriptsAndStyles() {
+        Source source = SourceImporter.parse(sourceJson).sources().get(0);
+        RuleEvaluator rules = new RuleEvaluator(new RhinoRuntime(request ->
+                new FetchResponse(request.url(), "", 200, Map.of())));
+        String html = "<div id='content'><style>.x{display:none}</style>"
+                + "<p>Visible</p><script>window.bad=true</script></div>";
+        String extracted = rules.one("id.content@html", html, "https://example.test/", source, false);
+        assertTrue(extracted.startsWith("<div id=\"content\">"));
+        assertTrue(extracted.contains("<p>Visible</p>"));
+        assertFalse(extracted.contains("<script"));
+        assertFalse(extracted.contains("<style"));
+        assertTrue(rules.one("id.content@all", html, "https://example.test/", source, false)
+                .contains("<script>window.bad=true</script>"));
+    }
+
     @Test void importSearchDetailCatalogContent() {
         Source source = SourceImporter.parse(sourceJson).sources().get(0);
         Transport transport = request -> {
