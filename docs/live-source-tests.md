@@ -112,4 +112,6 @@ XPath 跨站规则复测：AOAOSTAR 128 集合的黑岩阅读公开 API 搜索 2
 
 追加目录标记核对：黑岩同页 `class="isvip name"` 链接 2156 个，JVM/Android `isVip` 均标记 2156/2203 条；只证明该公开页的标记数量一致。又以显式详情 URL 绕开“手机小说”的异常搜索页，详情 HTTP 200，但当前页使用 `id=list`（92 个 `<dd>`），补充书源 `ruleToc.chapterList` 仍寻找 `id=lbks`，目录 0 条。探针输出 `SEARCH_SKIPPED_DIRECT_BOOK`，此为上游规则漂移而非搜索通过；详见[XPath 专项记录](xpath-and-optional-fields-probe.md)。
 
-补充 22 源中的速读谷原域名转向 `.cc`，因此从现站公开详情 URL 直接起跑。修正前停在 `DETAIL.ruleBookInfo.wordCount` 的 JS 异常；按官方详情可选字段隔离后，JVM/Android 都报该字段告警、详情通过，并访问 4 个 HTTP 200 目录页得到 3292 个去重章节 URL。四页公开 HTML 的章节链接独立去重也为 3292。`SEARCH_SKIPPED_DIRECT_BOOK` 表明搜索仍未验证；未取正文或整书。[阶段、哈希和复测命令](sudugu-paged-catalog-probe.md)。
+补充 22 源中的速读谷原域名转向 `.cc`，因此先从现站公开详情 URL 直接起跑。修正前停在 `DETAIL.ruleBookInfo.wordCount` 的 JS 异常；按官方详情可选字段隔离后，JVM/Android 都报该字段告警、详情通过，并访问 4 个 HTTP 200 目录页得到 3292 个去重章节 URL。四页公开 HTML 的章节链接独立去重也为 3292。该次探针以 `SEARCH_SKIPPED_DIRECT_BOOK` 明示跳过搜索；未取正文或整书。[阶段、哈希和复测命令](sudugu-paged-catalog-probe.md)。
+
+随后用这本已知存在的完整书名复测速读谷原始搜索：JVM/Android 均从 `.co` 发 POST，跨主机最终落在 `.cc` 的 200 搜索表单页、0 命中，分别标为响应可疑；JVM 新增逐跳记录确认为 **POST 301 → GET 200**。直接在 `.cc` POST 同样字段会 302 到该书详情。故“指定详情 URL 的目录成功”没有掩盖“原始源搜索入口失效”；Android 尚无逐跳方法记录，不归咎于 CSS 解析器。详见[速读谷记录](sudugu-paged-catalog-probe.md)。

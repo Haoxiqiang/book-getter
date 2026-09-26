@@ -263,6 +263,7 @@ public final class LiveSourceProbe {
         if (request.body() == null) builder.method(request.method(), HttpRequest.BodyPublishers.noBody());
         else builder.method(request.method(), HttpRequest.BodyPublishers.ofString(request.body(), StandardCharsets.UTF_8));
         HttpResponse<byte[]> response = client.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray());
+        redirectRows(response).forEach(System.out::println);
         String contentType = response.headers().firstValue("Content-Type").orElse("");
         Matcher match = CHARSET.matcher(contentType);
         Charset charset = request.charset() == null ? (match.find() ? Charset.forName(match.group(1)) : StandardCharsets.UTF_8)
@@ -272,6 +273,26 @@ public final class LiveSourceProbe {
         String encoding = response.headers().firstValue("Content-Encoding").orElse("");
         return new FetchResponse(response.uri().toString(),
                 new String(decodeBody(response.body(), encoding), charset), response.statusCode(), headers);
+    }
+
+    static List<String> redirectRows(HttpResponse<?> response) {
+        List<HttpResponse<?>> previous = new ArrayList<>();
+        HttpResponse<?> current = response;
+        while (current.previousResponse().isPresent()) {
+            current = current.previousResponse().get();
+            previous.add(current);
+        }
+        if (previous.isEmpty()) return List.of();
+        java.util.Collections.reverse(previous);
+        List<String> rows = new ArrayList<>();
+        for (HttpResponse<?> hop : previous) {
+            URI target = hop.headers().firstValue("Location").map(hop.uri()::resolve).orElse(hop.uri());
+            rows.add(row("REDIRECT", hop.request().method(), Integer.toString(hop.statusCode()),
+                    hop.uri().getHost(), hop.uri().getPath(), "to=" + target.getHost() + target.getPath()));
+        }
+        rows.add(row("REDIRECT_FINAL", response.request().method(), Integer.toString(response.statusCode()),
+                response.uri().getHost(), response.uri().getPath()));
+        return rows;
     }
 
     static byte[] decodeBody(byte[] bytes, String contentEncoding) throws IOException {

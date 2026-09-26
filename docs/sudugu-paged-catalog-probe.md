@@ -21,3 +21,19 @@ JVM 复测命令：
 Android Debug 探针用同一集合 URL，`sourceFilter=sudugu.co`、`keyword=DIRECT_BOOK`、`directBookUrl=https://www.sudugu.cc/1372/`、`catalogFirst=true`。两端均打印 `SEARCH_SKIPPED_DIRECT_BOOK`；不向旧搜索端点发送请求，也不抓首章或整书。独立数量核对只提取章节链接，没有保存正文。
 
 尚需使用正常搜索命中的第二个分页目录书源交叉验证，并检查更多页码格式、循环/跨书链接、目录顺序和正文边界。本样本不能计入 100 本整书验收。
+
+## 补充：已知存在作品的搜索入口（同日）
+
+用上面详情页对应的完整书名对原始书源执行正常搜索（**不再使用指定详情 URL**）：JVM 探针现在逐跳记录 `REDIRECT POST 301 www.sudugu.co/modules/article/search.php → www.sudugu.cc/modules/article/search.php`，最终为 `REDIRECT_FINAL GET 200`，收到 3096 字符的“小说搜索”表单页，0 命中并标 `RESPONSE_SUSPECT`。本地合成 301 回归也确认 JDK `HttpClient.Redirect.NORMAL` 在该路径将 POST 改为 GET。Android 模拟器记录原始 POST、跨主机最终 200 搜索表单、0 命中并标 `SEARCH_RESPONSE_SUSPECT`；Android 探针尚未逐跳记录最终方法，因此**只对 JVM**确认 POST→GET 的具体变化。
+
+直接对 `.cc` 同路径 POST 同一完整书名和原规则的 `action=login&searchtype=all&submit=` 字段，则收到 **302 到已知详情页 `/1372/`**。因此现站搜索接口对该词可用，旧域 301 是原始书源当前不能有效搜索的具体原因，不是 CSS 列表解析失败。原始规则与书源标识仍保持不变；逐跳诊断只打印方法、状态、主机与路径，不主动打印查询参数、Cookie 或正文。路径仍可能含敏感标识，外发探针日志前需审阅。
+
+正常搜索复测：
+
+```sh
+./gradlew :source-core:liveSourceProbe \
+  -PprobeJsonUrl=https://legado.aoaostar.com/sources/71e56d4f.json \
+  '-PprobeSource=速读谷' '-PprobeQueries=假太监：我乃大明九千岁' --offline
+```
+
+结论须分阶段书写：**搜索未通过；显式提供现站详情 URL 后，详情和四页目录通过**。不能把后者倒推为原始书源已具备完整搜索→阅读链路。
