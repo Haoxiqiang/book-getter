@@ -508,6 +508,21 @@ final class SourceEngineTest {
                 + java.net.URLEncoder.encode("无职", java.nio.charset.Charset.forName("GBK")), chinese.url());
     }
 
+    @Test void urlOptionsAcceptStringEncodedHeadersLikeLegado() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"http://app2.motie.com",
+             "searchUrl":"/search?word={{key}}&pageNo={{page}},{\\\"headers\\\":\\\"{os:'pc'}\\\"}"}
+            """).sources().get(0);
+        RequestPlanner planner = new RequestPlanner(new RhinoRuntime(request ->
+                new FetchResponse(request.url(), "", 200, Map.of())));
+        FetchRequest request = planner.plan(source.string("searchUrl"), source, "斗破苍穹", 1, source.id());
+        assertEquals("http://app2.motie.com/search?word="
+                + java.net.URLEncoder.encode("斗破苍穹", java.nio.charset.StandardCharsets.UTF_8)
+                + "&pageNo=1", request.url());
+        assertEquals("pc", request.headers().get("os"));
+        assertEquals("GET", request.method());
+    }
+
     @Test void webViewDelayOptionSurvivesRequestPlanning() {
         Source source = SourceImporter.parse("""
             {"bookSourceUrl":"https://example.test","searchUrl":"/search,{\\\"webView\\\":true,\\\"webViewDelayTime\\\":2500}"}
@@ -934,6 +949,50 @@ final class SourceEngineTest {
         assertEquals("https://example.test/api/novel/site/42",
                 evaluator.one("@js:result.id ? `/api/wenku/{{$.id}}` : `/api/novel/{{$.providerId}}/{{$.novelId}}`",
                         item, source.id(), source, true));
+        assertEquals("O'Neil", evaluator.one("@js:'{{$.author}}'",
+                Map.of("author", "O'Neil"), source.id(), source, false));
+    }
+
+    @Test void searchItemVariablesAndQuotedJsTemplatesProduceDistinctChapterUrls() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://easou.test","searchUrl":"/search?q={{key}}",
+             "ruleSearch":{"bookList":"$[*]","name":"$.novelName@put:{gid:enid}",
+               "bookUrl":"/toc?gid={{$.enid}}"},
+             "ruleToc":{"chapterList":"$.chapters[*]","chapterName":"$.chapterName",
+               "chapterUrl":"@js:'https://easou.test/show?gid=@get:{gid}&nid={{$.nid}}&st={{$.sort}}'"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
+                request.url().contains("/search")
+                        ? "[{\"novelName\":\"A\",\"enid\":\"G1\"},"
+                        + "{\"novelName\":\"B\",\"enid\":\"G2\"}]"
+                        : "{\"chapters\":[{\"chapterName\":\"One\",\"nid\":\"101\",\"sort\":1},"
+                        + "{\"chapterName\":\"Two\",\"nid\":\"102\",\"sort\":2}]}",
+                200, Map.of()));
+        List<BookHit> hits = engine.search(source, "x", 1);
+        assertEquals(2, hits.size());
+        assertEquals("G1", hits.get(0).variables().get("gid"));
+        assertEquals("G2", hits.get(1).variables().get("gid"));
+        List<Chapter> first = engine.chapters(source, engine.detail(source, hits.get(0)));
+        List<Chapter> second = engine.chapters(source, engine.detail(source, hits.get(1)));
+        assertEquals(List.of("https://easou.test/show?gid=G1&nid=101&st=1",
+                "https://easou.test/show?gid=G1&nid=102&st=2"), first.stream().map(Chapter::url).toList());
+        assertEquals("https://easou.test/show?gid=G2&nid=101&st=1", second.get(0).url());
+    }
+
+    @Test void detailVariablesRemainWithBookAcrossEngineInstances() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://scope.test","ruleBookInfo":{"name":"$.name@put:{token:$.token}"},
+             "ruleToc":{"chapterList":"$.chapters[*]","chapterName":"$.title",
+               "chapterUrl":"@js:'https://scope.test/chapter/@get:{token}/{{$.id}}'"}}
+            """).sources().get(0);
+        Transport transport = request -> new FetchResponse(request.url(),
+                "{\"name\":\"Book\",\"token\":\"T1\",\"chapters\":[{\"title\":\"One\",\"id\":\"1\"}]}",
+                200, Map.of());
+        BookHit hit = new BookHit(source.id(), "https://scope.test/book", "Book", "", "", "", Kind.TEXT);
+        BookDetail detail = new SourceEngine(transport).detail(source, hit);
+        assertEquals("T1", detail.hit().variables().get("token"));
+        assertEquals("https://scope.test/chapter/T1/1",
+                new SourceEngine(transport).chapters(source, detail).get(0).url());
     }
 
     @Test void optionalDirectDownloadRuleDoesNotBlockTextDetail() {

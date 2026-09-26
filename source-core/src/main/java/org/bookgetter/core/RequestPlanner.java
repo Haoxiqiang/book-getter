@@ -1,5 +1,6 @@
 package org.bookgetter.core;
 
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.net.URLEncoder;
@@ -66,7 +67,7 @@ public final class RequestPlanner {
             try { JsonParser.parseString(source.string("header")).getAsJsonObject().entrySet().forEach(e -> headers.put(e.getKey(), e.getValue().getAsString())); }
             catch (Exception ignored) { /* preflight/runtime will show request failure if required */ }
         }
-        if (options != null && options.has("headers")) options.getAsJsonObject("headers").entrySet().forEach(e -> headers.put(e.getKey(), e.getValue().getAsString()));
+        if (options != null && options.has("headers")) mergeHeaders(headers, options.get("headers"));
         String method = option(options, "method", "GET").toUpperCase();
         String body = bodyOption(options);
         String charsetName = option(options, "charset", null);
@@ -123,5 +124,18 @@ public final class RequestPlanner {
         if (options == null || !options.has("body") || options.get("body").isJsonNull()) return null;
         var body = options.get("body");
         return body.isJsonPrimitive() ? body.getAsString() : body.toString();
+    }
+
+    /** Legado's UrlOption accepts an object or a JSON-object string for headers. */
+    private static void mergeHeaders(Map<String, String> target, JsonElement value) {
+        try {
+            JsonObject object = value.isJsonObject() ? value.getAsJsonObject()
+                    : value.isJsonPrimitive() && value.getAsJsonPrimitive().isString()
+                    ? JsonParser.parseString(value.getAsString()).getAsJsonObject() : null;
+            if (object != null) object.entrySet().forEach(entry ->
+                    target.put(entry.getKey(), entry.getValue().getAsString()));
+        } catch (IllegalStateException | com.google.gson.JsonParseException ignored) {
+            // Legado's getHeaderMap returns null for an unparseable header option.
+        }
     }
 }

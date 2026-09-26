@@ -37,9 +37,17 @@ public final class Models {
     }
     public record ImportResult(List<Source> sources, List<String> sourceUrls, List<Diagnostic> diagnostics) {}
     public record BookHit(String sourceId, String url, String name, String author, String intro, String coverUrl,
-                          Kind kind, String genre, String wordCount, String lastChapter) {
+                          Kind kind, String genre, String wordCount, String lastChapter,
+                          Map<String, String> variables) {
+        public BookHit {
+            variables = variables == null ? Map.of() : Map.copyOf(variables);
+        }
         public BookHit(String sourceId, String url, String name, String author, String intro, String coverUrl, Kind kind) {
-            this(sourceId, url, name, author, intro, coverUrl, kind, "", "", "");
+            this(sourceId, url, name, author, intro, coverUrl, kind, "", "", "", Map.of());
+        }
+        public BookHit(String sourceId, String url, String name, String author, String intro, String coverUrl,
+                       Kind kind, String genre, String wordCount, String lastChapter) {
+            this(sourceId, url, name, author, intro, coverUrl, kind, genre, wordCount, lastChapter, Map.of());
         }
     }
     public record BookDetail(BookHit hit, String tocUrl, List<String> downloadUrls) {}

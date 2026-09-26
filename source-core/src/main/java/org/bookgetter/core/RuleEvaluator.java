@@ -29,10 +29,26 @@ public final class RuleEvaluator {
     private final ScriptRuntime script;
     private final Map<String, Map<String, String>> variables = new ConcurrentHashMap<>();
     private final ThreadLocal<String> scope = new ThreadLocal<>();
+    private final ThreadLocal<Map<String, String>> searchItemVariables = new ThreadLocal<>();
     public RuleEvaluator(ScriptRuntime script) { this.script = script; }
 
-    public void enterBook(String bookUrl) { scope.set(bookUrl); }
+    public void enterBook(String bookUrl) { enterBook(bookUrl, Map.of()); }
+    public void enterBook(String bookUrl, Map<String, String> inherited) {
+        scope.set(bookUrl);
+        if (inherited != null && !inherited.isEmpty())
+            variables.computeIfAbsent(bookUrl, ignored -> new ConcurrentHashMap<>()).putAll(inherited);
+    }
     public void leaveBook() { scope.remove(); }
+    public Map<String, String> bookVariables(String bookUrl) {
+        Map<String, String> current = variables.get(bookUrl);
+        return current == null ? Map.of() : Map.copyOf(current);
+    }
+    public void enterSearchItem() { searchItemVariables.set(new java.util.LinkedHashMap<>()); }
+    public Map<String, String> searchItemVariables() {
+        Map<String, String> current = searchItemVariables.get();
+        return current == null ? Map.of() : Map.copyOf(current);
+    }
+    public void leaveSearchItem() { searchItemVariables.remove(); }
 
     /** Detail init follows Legado getElement: keep a JSON object or DOM node structured. */
     public Object element(String rule, Object input, String baseUrl, Source source) {
@@ -50,6 +66,8 @@ public final class RuleEvaluator {
     }
 
     private Map<String, String> variables(Source source) {
+        Map<String, String> item = searchItemVariables.get();
+        if (item != null) return item;
         return variables.computeIfAbsent(scope.get() == null ? source.id() : scope.get(),
                 ignored -> new ConcurrentHashMap<>());
     }
@@ -184,6 +202,11 @@ public final class RuleEvaluator {
         }
         if (value.contains("{{")) {
             String text = expandTemplate(value, input, baseUrl, source).trim();
+            return url && !text.isBlank() ? absolute(baseUrl, text) : text;
+        }
+        if (input instanceof Map<?, ?> object && object.containsKey(value)) {
+            Object selected = object.get(value);
+            String text = selected == null ? "" : String.valueOf(selected).trim();
             return url && !text.isBlank() ? absolute(baseUrl, text) : text;
         }
         Combination combination = combination(value);
@@ -362,16 +385,30 @@ public final class RuleEvaluator {
     }
 
     private String expandScriptTemplate(String template, Object input, String baseUrl, Source source) {
-        Matcher matcher = Pattern.compile("\\{\\{([^{}]+)\\}\\}").matcher(template);
+        Matcher gets = GET.matcher(template);
+        StringBuffer withGets = new StringBuffer();
+        while (gets.find()) {
+            String stored = variables(source).getOrDefault(gets.group(1), "");
+            char quote = scriptQuoteAt(template, gets.start());
+            gets.appendReplacement(withGets, Matcher.quoteReplacement(quote == 0 ? stored : escapeJsString(stored, quote)));
+        }
+        gets.appendTail(withGets);
+        String script = withGets.toString();
+        Matcher matcher = Pattern.compile("\\{\\{([^{}]+)\\}\\}").matcher(script);
         StringBuffer result = new StringBuffer();
         boolean hasDeferredPath = false;
         while (matcher.find()) {
             String expression = matcher.group(1).trim();
             String replacement;
             if (expression.matches("\\$\\.[A-Za-z_$][A-Za-z0-9_$.]*")) {
-                String accessor = "__bgGet(" + new com.google.gson.Gson().toJson(expression.substring(2)) + ")";
-                replacement = inTemplateLiteral(template, matcher.start()) ? "${" + accessor + "}" : accessor;
-                hasDeferredPath = true;
+                char quote = scriptQuoteAt(script, matcher.start());
+                if (quote == '\'' || quote == '"') {
+                    replacement = escapeJsString(one(expression, input, baseUrl, source, false), quote);
+                } else {
+                    String accessor = "__bgGet(" + new com.google.gson.Gson().toJson(expression.substring(2)) + ")";
+                    replacement = quote == '`' ? "${" + accessor + "}" : accessor;
+                    hasDeferredPath = true;
+                }
             } else {
                 replacement = expression.equals("baseUrl") ? baseUrl
                         : expandTemplate("{{" + expression + "}}", input, baseUrl, source);
@@ -387,10 +424,20 @@ public final class RuleEvaluator {
                 + "return value == null ? '' : value; }\n" + result;
     }
 
-    private static boolean inTemplateLiteral(String text, int end) {
-        boolean inside = false;
-        for (int i = 0; i < end; i++) if (text.charAt(i) == '`' && (i == 0 || text.charAt(i - 1) != '\\')) inside = !inside;
-        return inside;
+    private static char scriptQuoteAt(String text, int end) {
+        char quote = 0;
+        for (int i = 0; i < end; i++) {
+            char current = text.charAt(i);
+            if (current == '\\') { i++; continue; }
+            if (quote == 0 && (current == '\'' || current == '"' || current == '`')) quote = current;
+            else if (current == quote) quote = 0;
+        }
+        return quote;
+    }
+
+    private static String escapeJsString(String value, char quote) {
+        String escaped = value.replace("\\", "\\\\").replace(String.valueOf(quote), "\\" + quote);
+        return quote == '`' ? escaped.replace("${", "\\${") : escaped;
     }
 
     private static String normalizeSelector(String selector) {

@@ -45,16 +45,20 @@ public final class SourceEngine {
             List<Object> items = rules.many(listRule, response.body(), response.url(), source);
             List<BookHit> hits = new ArrayList<>();
             for (Object item : items) {
-                String name = field(source, "ruleSearch", "name", item, response.url(), false);
-                String url = field(source, "ruleSearch", "bookUrl", item, response.url(), true);
-                if (name.isBlank() || url.isBlank()) continue;
-                hits.add(new BookHit(source.id(), url, name,
-                        field(source, "ruleSearch", "author", item, response.url(), false),
-                        optionalField(source, "ruleSearch", "intro", item, response.url(), false),
-                        optionalField(source, "ruleSearch", "coverUrl", item, response.url(), true), source.kind(),
-                        optionalField(source, "ruleSearch", "kind", item, response.url(), false),
-                        optionalField(source, "ruleSearch", "wordCount", item, response.url(), false),
-                        optionalField(source, "ruleSearch", "lastChapter", item, response.url(), false)));
+                rules.enterSearchItem();
+                try {
+                    String name = field(source, "ruleSearch", "name", item, response.url(), false);
+                    String url = field(source, "ruleSearch", "bookUrl", item, response.url(), true);
+                    if (name.isBlank() || url.isBlank()) continue;
+                    String author = field(source, "ruleSearch", "author", item, response.url(), false);
+                    String intro = optionalField(source, "ruleSearch", "intro", item, response.url(), false);
+                    String cover = optionalField(source, "ruleSearch", "coverUrl", item, response.url(), true);
+                    String genre = optionalField(source, "ruleSearch", "kind", item, response.url(), false);
+                    String wordCount = optionalField(source, "ruleSearch", "wordCount", item, response.url(), false);
+                    String lastChapter = optionalField(source, "ruleSearch", "lastChapter", item, response.url(), false);
+                    hits.add(new BookHit(source.id(), url, name, author, intro, cover, source.kind(),
+                            genre, wordCount, lastChapter, rules.searchItemVariables()));
+                } finally { rules.leaveSearchItem(); }
             }
             return hits;
         } catch (SourceFailure e) { throw e; }
@@ -63,7 +67,7 @@ public final class SourceEngine {
 
     public BookDetail detail(Source source, BookHit hit) {
         requireIdentity(source, hit.sourceId());
-        rules.enterBook(hit.url());
+        rules.enterBook(hit.url(), hit.variables());
         try {
             if (source.isJsSource()) return jsDetail(source, hit);
             FetchResponse response = fetch(requests.plan(hit.url(), source, "", 1, source.id()));
@@ -97,7 +101,7 @@ public final class SourceEngine {
                     cover.isBlank() ? hit.coverUrl() : cover, hit.kind(),
                     genre.isBlank() ? hit.genre() : genre,
                     wordCount.isBlank() ? hit.wordCount() : wordCount,
-                    lastChapter.isBlank() ? hit.lastChapter() : lastChapter);
+                    lastChapter.isBlank() ? hit.lastChapter() : lastChapter, rules.bookVariables(hit.url()));
             return new BookDetail(enriched, toc, download.isBlank() ? List.of() : List.of(download.split("\\s+")));
         } catch (SourceFailure e) { throw e; }
         catch (Exception e) { throw new SourceFailure(Stage.DETAIL, source.id(), "ruleBookInfo", e.getMessage(), e); }
@@ -107,7 +111,7 @@ public final class SourceEngine {
     public List<Chapter> chapters(Source source, BookDetail book) {
         requireIdentity(source, book.hit().sourceId());
         if (source.kind() == Kind.FILE) return List.of();
-        rules.enterBook(book.hit().url());
+        rules.enterBook(book.hit().url(), book.hit().variables());
         try {
             if (source.isJsSource()) return jsChapters(source, book);
             List<Chapter> chapters = new ArrayList<>();
@@ -155,7 +159,7 @@ public final class SourceEngine {
     /** Pass the catalog's following chapter URL so pagination cannot absorb that chapter. */
     public ChapterContent content(Source source, BookDetail book, Chapter chapter, String nextChapterUrl) {
         requireIdentity(source, book.hit().sourceId());
-        rules.enterBook(book.hit().url());
+        rules.enterBook(book.hit().url(), book.hit().variables());
         try {
             String text;
             if (source.isJsSource()) {
@@ -244,7 +248,7 @@ public final class SourceEngine {
                 orDefault(absoluteIfPresent(hit.url(), string(object, "coverUrl")), hit.coverUrl()), hit.kind(),
                 orDefault(string(object, "kind", "genre"), hit.genre()),
                 orDefault(string(object, "wordCount"), hit.wordCount()),
-                orDefault(string(object, "lastChapter"), hit.lastChapter()));
+                orDefault(string(object, "lastChapter"), hit.lastChapter()), hit.variables());
         return new BookDetail(enriched, toc.isBlank() ? hit.url() : toc,
                 jsonStrings(object, "downloadUrls").stream().map(url -> RuleEvaluator.absolute(hit.url(), url)).toList());
     }
