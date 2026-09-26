@@ -25,6 +25,7 @@ import org.w3c.dom.NodeList;
 public final class RuleEvaluator {
     private static final Pattern PUT = Pattern.compile("(?i)@put:(\\{[^}]+\\})");
     private static final Pattern GET = Pattern.compile("(?i)@get:\\{([^}]+)\\}");
+    private static final Pattern JSON_INNER = Pattern.compile("\\{(\\$\\.[^{}]+)\\}");
     private static final Pattern BRACKET_INDEX = Pattern.compile("^(.*?)(!)?\\[([\\d\\s,:-]+)\\]$");
     private final ScriptRuntime script;
     private final Map<String, Map<String, String>> variables = new ConcurrentHashMap<>();
@@ -76,9 +77,14 @@ public final class RuleEvaluator {
         if (rule == null || rule.isBlank()) return List.of();
         String value = rule.trim();
         if (value.startsWith("@@")) value = value.substring(2);
-        if (value.startsWith("<js>") && value.endsWith("</js>"))
-            return normalizeScript(script.evaluate(value.substring(4, value.length() - 5),
-                    Map.of("result", scriptInput(input), "baseUrl", baseUrl), source));
+        int scriptEnd = value.startsWith("<js>") ? value.indexOf("</js>") : -1;
+        if (scriptEnd >= 0) {
+            Object evaluated = script.evaluate(value.substring(4, scriptEnd),
+                    Map.of("result", scriptInput(input), "baseUrl", baseUrl), source);
+            String trailing = value.substring(scriptEnd + 5).trim();
+            return trailing.isEmpty() ? normalizeScript(evaluated)
+                    : many(trailing, evaluated == null ? "" : evaluated, baseUrl, source);
+        }
         int chainedJs = value.indexOf("\n@js:");
         if (chainedJs > 0) {
             List<Object> initial = many(value.substring(0, chainedJs), input, baseUrl, source);
@@ -174,7 +180,7 @@ public final class RuleEvaluator {
             String text = evaluated == null ? "" : evaluated.toString().trim();
             String trailing = value.substring(scriptEnd + 5).trim();
             if (!trailing.isEmpty()) {
-                if (!trailing.startsWith("##")) throw new IllegalArgumentException("Unsupported rule after </js>: " + trailing);
+                if (!trailing.startsWith("##")) return one(trailing, text, baseUrl, source, url);
                 text = replaceRule(text, trailing.split("##", -1)).trim();
             }
             return url && !text.isBlank() ? absolute(baseUrl, text) : text;
@@ -222,6 +228,20 @@ public final class RuleEvaluator {
             String joined = String.join("\n", merge(branches, combination.operator()));
             return combination.suffix().isEmpty() ? joined : replaceRule(joined, combination.suffix().split("##", -1)).trim();
         }
+        if (value.contains("{$.")) {
+            Matcher inner = JSON_INNER.matcher(value);
+            StringBuffer interpolated = new StringBuffer();
+            boolean resolved = false;
+            while (inner.find()) {
+                String selected = one(inner.group(1), input, baseUrl, source, false);
+                if (!selected.isEmpty()) resolved = true;
+                inner.appendReplacement(interpolated, Matcher.quoteReplacement(
+                        selected.isEmpty() ? inner.group() : selected));
+            }
+            inner.appendTail(interpolated);
+            String text = resolved ? interpolated.toString().trim() : "";
+            return url && !text.isBlank() ? absolute(baseUrl, text) : text;
+        }
         String[] regex = value.split("##", -1);
         value = regex[0];
         // Legado field rules may address the current list item directly, without a selector.
@@ -231,7 +251,12 @@ public final class RuleEvaluator {
                 || value.equals("textNodes") || value.equals("@textNodes")
                 || value.equals("all") || value.equals("@all")) {
             String action = value.startsWith("@") ? value.substring(1) : value;
-            String result = input instanceof Element element ? elementValue(element, action) : input.toString();
+            String result;
+            if (input instanceof Element element) result = elementValue(element, action);
+            else if (input instanceof Map<?, ?> object) {
+                Object selected = object.get(action);
+                result = selected == null ? "" : String.valueOf(selected);
+            } else result = input.toString();
             if (regex.length > 1) result = replaceRule(result, regex);
             result = result.trim();
             return url && !result.isBlank() ? absolute(baseUrl, result) : result;
@@ -508,7 +533,16 @@ public final class RuleEvaluator {
     }
 
     public static String absolute(String base, String path) {
-        try { return URI.create(base).resolve(path).toString(); }
+        int optionAt = path.indexOf(",{");
+        if (optionAt >= 0) {
+            try { JsonParser.parseString(path.substring(optionAt + 1).trim()).getAsJsonObject(); }
+            catch (Exception ignored) { optionAt = -1; }
+        }
+        String raw = optionAt < 0 ? path : path.substring(0, optionAt);
+        try {
+            String resolved = URI.create(base).resolve(raw).toString();
+            return optionAt < 0 ? resolved : resolved + path.substring(optionAt);
+        }
         catch (Exception ignored) { return path; }
     }
 }

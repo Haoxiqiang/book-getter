@@ -27,6 +27,8 @@
 8. 详情页的分类、字数、最新章、简介、封面也是可选字段；异常不能遮蔽有效目录地址，且应留下字段告警。书名、作者、目录地址仍是失败可见字段。官方依据为 `BookInfo.kt` 的逐字段 `try/catch`；[速读谷四页目录探针](sudugu-paged-catalog-probe.md)提供真实站点与 Android/JVM 对照，但显式跳过了搜索、未抓正文。
 9. JS 规则接在 DOM 列表之后时，`result` 必须保留节点语义，不能一律降成外层 HTML 字符串。受控宿主只暴露已验证的方法，不开放真实 Java 类；[rezero 卷规则探针](dom-node-js-probe.md)以 `result.attr('href')` 在 Android/JVM 均核对 23 个卷标题和 887 个普通章节。节点 `select/hasClass`、列表对象和混合链仍需另测。
 
+补充的[混合 JS/JSONPath 探针](mixed-js-jsonpath-probe.md)纠正了先前对 `{$.字段}` 的误读：官方 `AnalyzeByJSonPath.getString` 支持内嵌取值，`AnalyzeRule.splitSourceRule` 允许 `<js>...</js>` 后继续 JSONPath。JSON Map 上的 `href/text` 动作若不存在，必须返回空以允许 `||` 回退，不能把整张 Map 字符串化为有效 URL；但 JS 显式 `String(result)` 又可能依赖官方 Map 的字符串视图。两者要区分，且不开放 Java 反射。含 `,{URL选项}` 的相对章节链接只解析路径部分，保留选项供请求规划使用。
+
 ## 可执行测试矩阵
 
 | 层级 | 样本/夹具 | 通过条件 | 当前状态 |

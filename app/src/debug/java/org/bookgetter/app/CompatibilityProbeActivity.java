@@ -107,7 +107,7 @@ public final class CompatibilityProbeActivity extends Activity {
                     Log.i(TAG, clean("CATALOG_OK chapters=" + chapters.size()
                             + " volumes=" + volumeCount + " javascriptPlaceholders=" + jsPlaceholders
                             + " vip=" + vipCount
-                            + (chapters.isEmpty() ? "" : " firstUrl=" + chapters.get(0).url())));
+                            + (chapters.isEmpty() ? "" : " firstUrl=" + ResponseSignals.urlForLog(chapters.get(0).url()))));
                     if (catalogFirst || directCatalogOnly) return;
                     List<Chapter> readableChapters = chapters.stream().filter(chapter -> !chapter.volume()).toList();
                     if (readableChapterIndex >= readableChapters.size())

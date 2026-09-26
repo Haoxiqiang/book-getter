@@ -42,6 +42,37 @@ final class SourceEngineTest {
         assertEquals("Second", hits.get(1).name());
     }
 
+    @Test void embeddedScriptCanFeedJsonPathInListAndFieldRules() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://chain.test","searchUrl":"/search?q={{key}}",
+             "ruleSearch":{"bookList":"<js>result=JSON.stringify({data:{list:[{name:'A',url:'/a'},{name:'B',url:'/b'}]}});result</js> $.data.list",
+               "name":"$.name","bookUrl":"$.url"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request ->
+                new FetchResponse(request.url(), "{}", 200, Map.of()));
+        List<BookHit> hits = engine.search(source, "book", 1);
+        assertEquals(List.of("A", "B"), hits.stream().map(BookHit::name).toList());
+        assertEquals("https://chain.test/b", hits.get(1).url());
+
+        RuleEvaluator rules = new RuleEvaluator(new RhinoRuntime(request ->
+                new FetchResponse(request.url(), "", 200, Map.of())));
+        assertEquals(List.of("A", "B"), rules.many(
+                "<js>result=JSON.stringify(['A','B']);result</js> $.[*]",
+                "{}", source.id(), source));
+        assertEquals("A", rules.one("<js>result=JSON.stringify({title:'A'});result</js> $.title",
+                "{}", source.id(), source, false));
+        assertEquals("https://chain.test/ebook/42/", rules.one(
+                "$.reader_uri||https://chain.test/ebook/{$.id}/",
+                Map.of("id", 42), source.id(), source, true));
+        Map<String, Object> chapter = Map.of("title", "Chapter", "links", Map.of("reader", "/reader/42"));
+        assertEquals("Chapter", rules.one("text||$.title", chapter, source.id(), source, false));
+        assertEquals("https://chain.test/reader/42", rules.one(
+                "href||$.links.reader", chapter, source.id(), source, true));
+        assertEquals("https://chain.test/reader/42,{\"webView\":true}", rules.one(
+                "href||$.links.reader<js>result+',{\"webView\":true}'</js>",
+                chapter, source.id(), source, true));
+    }
+
     @Test void chapterUrlWithSourceOptionsResolvesAgainstCatalogUrl() {
         Source source = SourceImporter.parse(sourceJson).sources().get(0);
         RequestPlanner planner = new RequestPlanner(new RhinoRuntime(request ->
@@ -226,7 +257,8 @@ final class SourceEngineTest {
     @Test void emptyAndChallengeResponsesAreNotRuleFailuresOrValidZeroResults() {
         Source source = SourceImporter.parse(sourceJson).sources().get(0);
         for (String body : List.of("", "<title>Just a moment...</title><p>Cloudflare challenge</p>",
-                "<html><script>window.location.href=\"/lander\"</script></html>")) {
+                "<html><script>window.location.href=\"/lander\"</script></html>",
+                "{\"ret\":303,\"needLogin\":true,\"loginUrl\":\"https://example.test/login\"}")) {
             SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(), body, 200, Map.of()));
             SourceFailure failure = assertThrows(SourceFailure.class, () -> engine.search(source, "book", 1));
             assertEquals(Stage.SEARCH, failure.stage);
@@ -496,6 +528,16 @@ final class SourceEngineTest {
         RuntimeException failure = assertThrows(RuntimeException.class, () -> runtime.evaluate(
                 "java.startBrowserAwait('https://verify.test', 'Verify')", Map.of(), source));
         assertTrue(failure.getMessage().contains("Interactive browser verification is unavailable"));
+    }
+
+    @Test void jsonPathMapItemKeepsLegadoStringViewWithoutExposingJavaObject() {
+        Source source = SourceImporter.parse("{\"bookSourceUrl\":\"https://audio.test\"}").sources().get(0);
+        RhinoRuntime runtime = new RhinoRuntime(request ->
+                new FetchResponse(request.url(), "", 200, Map.of()));
+        Object value = runtime.evaluate("String(result).match(/id=(\\d+)/)[1] + ':' + result.id",
+                Map.of("result", Map.of("id", 123, "catalog_name", "Audio")), source);
+        assertEquals("123:123", value);
+        assertEquals(false, runtime.evaluate("!!result.getClass", Map.of("result", Map.of("id", 123)), source));
     }
 
     @Test void signedUrlHostUsesUtf8Base64AndLowercaseMd5() {
@@ -826,7 +868,7 @@ final class SourceEngineTest {
         assertEquals("https://xpath.test/two.html", chapters.get(1).url());
     }
 
-    @Test void malformedOptionalSearchFieldWarnsWithoutDroppingBooks() {
+    @Test void jsonInnerRuleInterpolatesOptionalSearchMetadata() {
         Source source = SourceImporter.parse("""
             {"bookSourceUrl":"https://metadata.test","searchUrl":"/search?q={{key}}",
              "ruleSearch":{"bookList":"$.data[*]","name":"$.name","bookUrl":"$.url",
@@ -841,10 +883,9 @@ final class SourceEngineTest {
         List<BookHit> hits = engine.search(source, "query", 1);
         assertEquals(2, hits.size());
         assertEquals("https://metadata.test/one", hits.get(0).url());
-        assertEquals("", hits.get(0).wordCount());
-        assertEquals(2, warnings.size());
-        assertEquals("ruleSearch.wordCount", warnings.get(0).field());
-        assertEquals("OPTIONAL_FIELD_ERROR", warnings.get(0).code());
+        assertEquals("123字", hits.get(0).wordCount());
+        assertEquals("456字", hits.get(1).wordCount());
+        assertTrue(warnings.isEmpty());
     }
 
     @Test void failingOptionalDetailFieldDoesNotHideCatalogUrl() {

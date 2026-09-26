@@ -160,7 +160,7 @@ public final class LiveSourceProbe {
                                             || value.equals("PARKED_DOMAIN") || value.equals("APP_UPGRADE_REQUIRED")
                                             || value.equals("PAGE_NOT_FOUND"));
                             System.out.println(row(source.name(), keyword, suspect ? "DETAIL_SUSPECT" : "DETAIL_OK",
-                                    "", detail.hit().name(), detail.tocUrl() + " " + metadataFlags(detail.hit())));
+                                    "", detail.hit().name(), ResponseSignals.urlForLog(detail.tocUrl()) + " " + metadataFlags(detail.hit())));
                             List<Chapter> chapters = engine.chapters(source, detail);
                             long nonVolume = chapters.stream().filter(chapter -> !chapter.volume()).count();
                             long jsPlaceholders = chapters.stream().filter(chapter -> !chapter.volume()
@@ -171,8 +171,8 @@ public final class LiveSourceProbe {
                             System.out.println(row(source.name(), keyword, "CATALOG_OK", Integer.toString(chapters.size()), "",
                                     chapters.isEmpty() ? "" : "nonVolume=" + nonVolume
                                             + " javascriptPlaceholders=" + jsPlaceholders + " vip=" + vip
-                                            + " firstUrl=" + chapters.get(0).url()
-                                            + " firstNonVolumeUrl=" + firstNonVolumeUrl));
+                                            + " firstUrl=" + ResponseSignals.urlForLog(chapters.get(0).url())
+                                            + " firstNonVolumeUrl=" + ResponseSignals.urlForLog(firstNonVolumeUrl)));
                             if (!chapters.isEmpty() && exportFirst == null && !catalogFirst) {
                                 List<Chapter> readableChapters = chapters.stream().filter(chapter -> !chapter.volume()).toList();
                                 if (readableChapterIndex >= readableChapters.size())
@@ -180,7 +180,8 @@ public final class LiveSourceProbe {
                                             + " exceeds " + readableChapters.size());
                                 Chapter firstChapter = readableChapters.get(readableChapterIndex);
                                 System.out.println(row(source.name(), keyword, "CONTENT_SELECTED",
-                                        Integer.toString(readableChapterIndex), firstChapter.title(), firstChapter.url()));
+                                        Integer.toString(readableChapterIndex), firstChapter.title(),
+                                        ResponseSignals.urlForLog(firstChapter.url())));
                                 int contentQualityStart = responseQualities.size();
                                 var content = engine.content(source, detail, firstChapter,
                                         SourceEngine.nextReadableUrl(chapters, firstChapter));

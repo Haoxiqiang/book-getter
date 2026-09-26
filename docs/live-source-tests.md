@@ -108,7 +108,7 @@
 
 对照官方 `@html` 语义后，补了外层节点返回及 script/style 清理。抖音小说同一首章：修复前 JVM 原始 1095/可见 927 字符，修复后 JVM 与 Android 均为原始 1169/可见 927 字符；搜索 20 条、详情与 112 章目录仍通过。仅单章验证，完整边界见[`@html` 探针](html-action-probe.md)，不增加整书数。
 
-XPath 跨站规则复测：AOAOSTAR 128 集合的黑岩阅读公开 API 搜索 20 条，坏 `wordCount` 规则仅报 `FIELD_WARNING`；首条近似命中详情与 2203 条目录在 JVM/Android 均通过，首章 URL 相同。修复项包括 XPath 列表保留节点、谓词 `@` 模式识别、`href<js>…</js>` 串联和 Android doctype 转 DOM。其他 XPath 站点在搜索阶段遇到 403/404/超时/非搜索页，未冒称跨站通过；本轮不读付费正文。证据与边界见[专项记录](xpath-and-optional-fields-probe.md)。
+XPath 跨站规则复测：AOAOSTAR 128 集合的黑岩阅读公开 API 搜索 20 条；当时误把 `{$.words}字` 判作坏 `wordCount` 规则并报 `FIELD_WARNING`，现已按官方 JSONPath 内嵌规则修复，重测首条字数非空。首条近似命中详情与 2203 条目录在 JVM/Android 均通过，首章 URL 相同。修复项还包括 XPath 列表保留节点、谓词 `@` 模式识别、`href<js>…</js>` 串联和 Android doctype 转 DOM。其他 XPath 站点在搜索阶段遇到 403/404/超时/非搜索页，未冒称跨站通过；本轮不读付费正文。证据与边界见[专项记录](xpath-and-optional-fields-probe.md)。
 
 追加目录标记核对：黑岩同页 `class="isvip name"` 链接 2156 个，JVM/Android `isVip` 均标记 2156/2203 条；只证明该公开页的标记数量一致。又以显式详情 URL 绕开“手机小说”的异常搜索页，详情 HTTP 200，但当前页使用 `id=list`（92 个 `<dd>`），补充书源 `ruleToc.chapterList` 仍寻找 `id=lbks`，目录 0 条。探针输出 `SEARCH_SKIPPED_DIRECT_BOOK`，此为上游规则漂移而非搜索通过；详见[XPath 专项记录](xpath-and-optional-fields-probe.md)。
 
@@ -129,3 +129,5 @@ XPath 跨站规则复测：AOAOSTAR 128 集合的黑岩阅读公开 API 搜索 2
 换用更新时间较新的 XIU2 22 源补充集合，挑 13 个不同域名做单词搜索：阅友小说 `m.suixkan.com` 可从搜索 5 条走到详情、1649 章目录与单章，JVM/Android 均同数，公开目录链接独立计数亦为 1649；其余多数在 403/401/TLS/EOF 或有效零结果。四个源的 Cloudflare 分支调用 `java.longToast` 后等待 `startBrowserAwait` 人工验证；现 Java 宿主提示回调可测试，交互式验证缺口明确报出，不绕过访问控制。只读了一章，没有整书下载。[集合哈希、逐站与复测记录](xiu2-cross-site-probe.md)。
 
 XIU2 源再用宽词“修仙”验证酷我小说：先前“斗破苍穹”是明确的 API 空结果，但不能据此认定整源失效；新词在 JVM/Android 均搜索 30、详情通过、目录 2052，公开 API `data` 独立计数也是 2052，首章提取可见 2616 字符。两条 69 书吧源分别停在上游 `<js>` 无效语法、旧域 POST 经 301 变 GET 的入口漂移；未私自改写第三方规则。没有整书下载。[阶段证据与复测命令](xiu2-keyword-and-69shuba-probe.md)。
+
+关耳女频 86 源集合再抽 11 个不同域名：长佩的 `<js>→JSONPath` 列表链、豆瓣的 `{$.id}`/Map 回退与 URL 选项、猫耳 FM 的安全 Map 字符串视图依次暴露了兼容缺口。修复后 JVM/Android 分别验证长佩 10 搜索/7 目录、豆瓣 6 搜索/50 目录（VIP 33 与公开 API 价格标记同数）、猫耳 FM 40 搜索/6 音频目录；52书库 JVM 搜索 20/目录 78。喜马拉雅 HTTP 200 的 `needLogin=true` 现明确报登录前提。没有取付费正文、媒体或整书。[来源哈希、逐站状态与官方依据](mixed-js-jsonpath-probe.md)。

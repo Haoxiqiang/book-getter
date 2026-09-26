@@ -235,6 +235,13 @@ public final class RhinoRuntime implements ScriptRuntime {
             return;
         }
         Object jsValue = cx.evaluateString(scope, "(" + gson.toJson(value) + ")", "binding:" + name, 1, null);
+        if (value instanceof Map<?, ?> && jsValue instanceof ScriptableObject object) {
+            object.defineProperty("toString", new BaseFunction() {
+                @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
+                    return value.toString();
+                }
+            }, ScriptableObject.DONTENUM);
+        }
         ScriptableObject.putProperty(scope, name, jsValue);
     }
 

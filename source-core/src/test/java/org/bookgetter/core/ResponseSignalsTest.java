@@ -22,6 +22,15 @@ final class ResponseSignalsTest {
         assertFalse(ResponseSignals.javascriptPlaceholderUrl(null));
     }
 
+    @Test void probeUrlLoggingOmitsQueriesAndInvalidObjectText() {
+        assertEquals("https://example.test/chapter/1", ResponseSignals.urlForLog(
+                "https://example.test/chapter/1?token=secret#fragment"));
+        assertEquals("https://example.test/chapter/1 [options]", ResponseSignals.urlForLog(
+                "https://example.test/chapter/1,{\"headers\":{\"Authorization\":\"secret\"}}"));
+        assertTrue(ResponseSignals.urlForLog("{links={reader=/chapter},abstract=private text}")
+                .startsWith("<invalid-url chars="));
+    }
+
     @Test void crossHostAndAcceptedResponsesMakeEmptySearchUnverified() {
         FetchRequest request = new FetchRequest("https://old.example/search?q=book");
         FetchResponse migrated = new FetchResponse("https://new.example/", "<html>Home</html>", 200, Map.of());
@@ -66,6 +75,9 @@ final class ResponseSignalsTest {
         assertEquals("BUSINESS_ERROR", quality(200, "{\"code\":100103,\"message\":\"PARAM_INVALID\",\"data\":null}"));
         assertEquals("BUSINESS_ERROR", quality(200, "{\"code\":-1,\"msg\":\"没有该用户!\"}"));
         assertEquals("BUSINESS_ERROR", quality(200, "{\"code\":4004,\"msg\":\"missing fields\",\"data\":[]}"));
+        assertEquals("LOGIN_REQUIRED", quality(200,
+                "{\"ret\":303,\"needLogin\":true,\"loginUrl\":\"https://example.test/login\"}"));
+        assertTrue(ResponseSignals.suspectEmptySearch("LOGIN_REQUIRED"));
         assertEquals("UNCLASSIFIED", quality(200, "{\"errno\":0,\"data\":[]}"));
         assertEquals("UNCLASSIFIED", quality(200, "{\"code\":0,\"message\":\"OK\",\"data\":null}"));
         assertEquals("UNCLASSIFIED", quality(200, "<html><title>搜索结果</title></html>"));

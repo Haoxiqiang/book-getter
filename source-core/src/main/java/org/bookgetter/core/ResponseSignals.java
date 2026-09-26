@@ -42,6 +42,7 @@ public final class ResponseSignals {
 
     public static boolean suspectEmptySearch(String signal) {
         return signal.equals("BUSINESS_ERROR") || signal.equals("CHALLENGE_PAGE")
+                || signal.equals("LOGIN_REQUIRED")
                 || signal.equals("PARKED_DOMAIN") || signal.equals("APP_UPGRADE_REQUIRED")
                 || signal.equals("CLIENT_SIDE_REDIRECT")
                 || signal.equals("PAGE_NOT_FOUND")
@@ -53,6 +54,28 @@ public final class ResponseSignals {
     /** Catalog-only diagnostic: a JavaScript link is not a directly fetchable chapter URL. */
     public static boolean javascriptPlaceholderUrl(String url) {
         return url != null && url.stripLeading().toLowerCase(Locale.ROOT).startsWith("javascript:");
+    }
+
+    /** Keep probe logs useful without emitting query credentials or malformed object text. */
+    public static String urlForLog(String value) {
+        if (value == null || value.isBlank()) return "<empty-url>";
+        try {
+            int optionAt = value.indexOf(",{");
+            String target = value;
+            if (optionAt >= 0) {
+                JsonParser.parseString(value.substring(optionAt + 1)).getAsJsonObject();
+                target = value.substring(0, optionAt);
+            }
+            URI uri = URI.create(target);
+            if (uri.getHost() == null || uri.getUserInfo() != null
+                    || !("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme())))
+                return "<invalid-url chars=" + value.length() + ">";
+            String path = uri.getRawPath() == null ? "" : uri.getRawPath();
+            if (path.length() > 120) path = path.substring(0, 120) + "…";
+            return uri.getScheme() + "://" + uri.getHost() + path + (optionAt < 0 ? "" : " [options]");
+        } catch (Exception ignored) {
+            return "<invalid-url chars=" + value.length() + ">";
+        }
     }
 
     public static String quality(FetchResponse response) {
@@ -78,6 +101,8 @@ public final class ResponseSignals {
                 JsonElement parsed = JsonParser.parseString(body);
                 if (parsed.isJsonObject()) {
                     JsonObject object = parsed.getAsJsonObject();
+                    if (object.has("needLogin") && object.get("needLogin").isJsonPrimitive()
+                            && object.get("needLogin").getAsBoolean()) return "LOGIN_REQUIRED";
                     if (object.has("chapter") && object.get("chapter").isJsonObject()) {
                         JsonObject chapter = object.getAsJsonObject("chapter");
                         if (chapter.has("body") && chapter.get("body").isJsonPrimitive()

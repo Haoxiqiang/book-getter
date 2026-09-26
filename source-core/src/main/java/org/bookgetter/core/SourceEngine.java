@@ -319,6 +319,7 @@ public final class SourceEngine {
     private static void rejectUnusableResponse(FetchResponse response, Stage stage, String sourceId, String field) {
         String quality = ResponseSignals.quality(response);
         if (quality.equals("BUSINESS_ERROR") || quality.equals("EMPTY_RESPONSE")
+                || quality.equals("LOGIN_REQUIRED")
                 || quality.equals("CHALLENGE_PAGE") || quality.equals("PARKED_DOMAIN")
                 || quality.equals("CLIENT_SIDE_REDIRECT")
                 || quality.equals("APP_UPGRADE_REQUIRED") || quality.equals("PAGE_NOT_FOUND"))
