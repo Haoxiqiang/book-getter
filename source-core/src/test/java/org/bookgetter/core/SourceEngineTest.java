@@ -922,11 +922,24 @@ final class SourceEngineTest {
         assertEquals("https://example.test/cover.jpg", detail.hit().coverUrl());
     }
 
-    @Test void preflightFindsUnimplementedHostMethods() {
+    @Test void preflightSeparatesProvidedPartialAndMissingHostMethodsByField() {
         Source source = SourceImporter.parse("""
-            {"bookSourceUrl":"https://example.test","searchUrl":"@js:java.get('https://example.test')"}
+            {"bookSourceUrl":"https://example.test",
+             "searchUrl":"@js:java.ajax('https://example.test'); java.get('key')",
+             "jsLib":"function helper(){ return java.head('https://example.test'); }",
+             "ruleToc":{"chapterList":"@js:java.getString('li'); java.encodeURI(result)"}}
             """).sources().get(0);
-        assertTrue(SourceImporter.preflight(source).stream().anyMatch(item -> item.code().equals("UNSUPPORTED_JS_HOST") && item.message().contains("get")));
+        List<Diagnostic> diagnostics = SourceImporter.preflight(source);
+        assertTrue(diagnostics.stream().anyMatch(item -> item.code().equals("PARTIAL_JS_HOST")
+                && item.field().equals("searchUrl") && item.message().contains("get")
+                && !item.message().contains("ajax")));
+        assertTrue(diagnostics.stream().anyMatch(item -> item.code().equals("UNSUPPORTED_JS_HOST")
+                && item.field().equals("jsLib") && item.message().contains("head")));
+        assertTrue(diagnostics.stream().anyMatch(item -> item.code().equals("UNSUPPORTED_JS_HOST")
+                && item.field().equals("ruleToc.chapterList") && item.stage() == Stage.CATALOG
+                && item.message().contains("encodeURI")));
+        assertTrue(diagnostics.stream().anyMatch(item -> item.code().equals("PARTIAL_JS_HOST")
+                && item.field().equals("ruleToc.chapterList") && item.message().contains("getString")));
     }
 
     @Test void jsonPathSearchUsesStructuredResults() {

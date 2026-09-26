@@ -132,6 +132,12 @@ public final class LiveSourceProbe {
         SourceEngine engine = new SourceEngine(transport, new RhinoRuntime(transport), diagnostics::add);
         for (Source source : unique.values()) {
             if (!matchesSource(source, sourceFilter)) continue;
+            SourceImporter.preflight(source).stream()
+                    .filter(diagnostic -> diagnostic.code().equals("PARTIAL_JS_HOST")
+                            || diagnostic.code().equals("UNSUPPORTED_JS_HOST"))
+                    .forEach(diagnostic -> System.out.println(row(source.name(), "", "PREFLIGHT", "",
+                            diagnostic.stage() + "." + diagnostic.field(),
+                            diagnostic.code() + ": " + diagnostic.message())));
             for (String keyword : queries) {
                 try {
                     diagnostics.clear();

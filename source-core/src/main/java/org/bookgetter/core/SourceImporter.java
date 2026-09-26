@@ -12,6 +12,10 @@ import java.util.regex.Pattern;
 import static org.bookgetter.core.Models.*;
 
 public final class SourceImporter {
+    private static final Pattern HOST_CALL = Pattern.compile("\\bjava\\.([A-Za-z_$][A-Za-z0-9_$]*)\\s*\\(");
+    private static final Set<String> PROVIDED_HOST = Set.of("ajax", "put", "md5Encode", "base64Encode", "timeFormatUTC");
+    private static final Set<String> PARTIAL_HOST = Set.of("get", "post", "getString", "getElement",
+            "getElements", "setContent", "t2s", "toast", "longToast", "startBrowserAwait");
     private SourceImporter() {}
 
     public static ImportResult parse(String text) {
@@ -55,7 +59,8 @@ public final class SourceImporter {
 
     public static List<Diagnostic> preflight(Source source) {
         List<Diagnostic> result = new ArrayList<>();
-        if (source.isJsSource()) result.add(new Diagnostic(Stage.IMPORT, "BASIC_MAIN_JS", "Only basic mainJs functions and java.ajax are available", "mainJs"));
+        if (source.isJsSource()) result.add(new Diagnostic(Stage.IMPORT, "BASIC_MAIN_JS",
+                "Only the documented mainJs function and host-method subset is available", "mainJs"));
         for (String field : List.of("exploreUrl", "exploreScreen", "ruleExplore", "ruleReview", "loginCheckJs", "coverDecodeJs")) {
             if (source.json().has(field)) result.add(new Diagnostic(Stage.IMPORT, "DEFERRED_CAPABILITY", field + " is not executed", field));
         }
@@ -66,15 +71,35 @@ public final class SourceImporter {
         }
         if (!source.isJsSource() && (source.string("searchUrl") == null || source.string("searchUrl").isBlank()))
             result.add(new Diagnostic(Stage.SEARCH, "NO_SEARCH_URL", "Source cannot perform search", "searchUrl"));
-        Set<String> hostMethods = new LinkedHashSet<>();
-        for (String field : List.of("mainJs", "searchUrl", "ruleSearch", "ruleBookInfo", "ruleToc", "ruleContent")) {
-            if (source.json().has(field)) {
-                Matcher matcher = Pattern.compile("\\bjava\\.([A-Za-z_$][A-Za-z0-9_$]*)\\s*\\(").matcher(source.json().get(field).toString());
-                while (matcher.find()) if (!matcher.group(1).equals("ajax")) hostMethods.add(matcher.group(1));
-            }
+        for (String field : List.of("mainJs", "jsLib", "searchUrl"))
+            if (source.string(field) != null) addHostDiagnostics(result, field, source.string(field));
+        for (String section : List.of("ruleSearch", "ruleBookInfo", "ruleToc", "ruleContent")) {
+            JsonObject rules = source.rules(section);
+            if (rules != null) for (var entry : rules.entrySet())
+                addHostDiagnostics(result, section + "." + entry.getKey(), entry.getValue().toString());
         }
-        if (!hostMethods.isEmpty()) result.add(new Diagnostic(Stage.IMPORT, "UNSUPPORTED_JS_HOST", "JavaScript host methods need implementation: " + String.join(", ", hostMethods), "mainJs/rules"));
         return result;
+    }
+
+    private static void addHostDiagnostics(List<Diagnostic> diagnostics, String field, String rule) {
+        Set<String> partial = new LinkedHashSet<>();
+        Set<String> missing = new LinkedHashSet<>();
+        Matcher matcher = HOST_CALL.matcher(rule);
+        while (matcher.find()) {
+            String method = matcher.group(1);
+            if (PROVIDED_HOST.contains(method)) continue;
+            (PARTIAL_HOST.contains(method) ? partial : missing).add(method);
+        }
+        Stage stage = field.equals("searchUrl") || field.startsWith("ruleSearch.") ? Stage.SEARCH
+                : field.startsWith("ruleBookInfo.") ? Stage.DETAIL
+                : field.startsWith("ruleToc.") ? Stage.CATALOG
+                : field.startsWith("ruleContent.") ? Stage.CONTENT : Stage.IMPORT;
+        if (!partial.isEmpty()) diagnostics.add(new Diagnostic(stage, "PARTIAL_JS_HOST",
+                "JavaScript host methods have limited or interactive-only support: " + String.join(", ", partial),
+                Severity.WARNING, field));
+        if (!missing.isEmpty()) diagnostics.add(new Diagnostic(stage, "UNSUPPORTED_JS_HOST",
+                "JavaScript host methods are unavailable: " + String.join(", ", missing),
+                Severity.WARNING, field));
     }
 
     private static String string(JsonObject json, String key) {
