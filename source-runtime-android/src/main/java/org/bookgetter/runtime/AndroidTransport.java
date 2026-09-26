@@ -66,7 +66,9 @@ public final class AndroidTransport implements Transport {
         AtomicReference<FetchResponse> result = new AtomicReference<>();
         AtomicReference<Exception> error = new AtomicReference<>();
         AtomicReference<WebView> viewRef = new AtomicReference<>();
-        new Handler(Looper.getMainLooper()).post(() -> {
+        Handler mainHandler = new Handler(Looper.getMainLooper());
+        AtomicReference<Runnable> pendingRead = new AtomicReference<>();
+        mainHandler.post(() -> {
             try {
                 WebView view = new WebView(context);
                 viewRef.set(view);
@@ -75,15 +77,23 @@ public final class AndroidTransport implements Transport {
                 cookies.setAcceptThirdPartyCookies(view, true);
                 view.setWebViewClient(new WebViewClient() {
                 @Override public void onPageFinished(WebView webView, String url) {
-                    try {
-                        webView.evaluateJavascript("document.documentElement.outerHTML", html -> {
-                            try {
-                                String decoded = new com.google.gson.Gson().fromJson(html, String.class);
-                                result.set(new FetchResponse(url, decoded == null ? "" : decoded, 200, Map.of()));
-                            } catch (Exception e) { error.set(e); }
-                            done.countDown();
-                        });
-                    } catch (Exception e) { error.set(e); done.countDown(); }
+                    Runnable previous = pendingRead.get();
+                    if (previous != null) mainHandler.removeCallbacks(previous);
+                    Runnable read = () -> {
+                        try {
+                            webView.evaluateJavascript("document.documentElement.outerHTML", html -> {
+                                try {
+                                    String decoded = new com.google.gson.Gson().fromJson(html, String.class);
+                                    result.set(new FetchResponse(url, decoded == null ? "" : decoded, 200, Map.of()));
+                                } catch (Exception e) { error.set(e); }
+                                done.countDown();
+                            });
+                        } catch (Exception e) { error.set(e); done.countDown(); }
+                    };
+                    pendingRead.set(read);
+                    // Legado BackstageWebView defaults to 100 + 900 ms without webJs.
+                    long delay = request.webViewDelayMillis() == 0 ? 1000L : 100L + request.webViewDelayMillis();
+                    mainHandler.postDelayed(read, delay);
                 }
                 @Override public void onReceivedError(WebView webView, WebResourceRequest req, WebResourceError webError) {
                     if (req.isForMainFrame()) { error.set(new IOException(webError.getDescription().toString())); done.countDown(); }
@@ -97,7 +107,10 @@ public final class AndroidTransport implements Transport {
         });
         boolean finished;
         try { finished = done.await(45, TimeUnit.SECONDS); }
-        finally { new Handler(Looper.getMainLooper()).post(() -> { if (viewRef.get() != null) viewRef.get().destroy(); }); }
+        finally { mainHandler.post(() -> {
+            if (pendingRead.get() != null) mainHandler.removeCallbacks(pendingRead.get());
+            if (viewRef.get() != null) viewRef.get().destroy();
+        }); }
         if (!finished) throw new IOException("WebView timeout: " + request.url());
         if (error.get() != null) throw error.get();
         return result.get();

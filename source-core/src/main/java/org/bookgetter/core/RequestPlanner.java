@@ -67,8 +67,12 @@ public final class RequestPlanner {
             catch (Exception ignored) { /* preflight/runtime will show request failure if required */ }
         }
         if (options != null && options.has("headers")) options.getAsJsonObject("headers").entrySet().forEach(e -> headers.put(e.getKey(), e.getValue().getAsString()));
+        long webViewDelay = 0;
+        if (options != null && options.has("webViewDelayTime"))
+            webViewDelay = Math.max(0, options.get("webViewDelayTime").getAsLong());
         return new FetchRequest(RuleEvaluator.absolute(base, rawUrl), option(options, "method", "GET").toUpperCase(), headers,
-                option(options, "body", null), option(options, "charset", null), options != null && options.has("webView") && options.get("webView").getAsBoolean());
+                option(options, "body", null), option(options, "charset", null),
+                options != null && options.has("webView") && options.get("webView").getAsBoolean(), webViewDelay);
     }
 
     private static String option(JsonObject object, String key, String fallback) {

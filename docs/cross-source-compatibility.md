@@ -9,7 +9,7 @@
 | 书源 | 搜索阶段实测 | 当前归因和下一步 |
 | --- | --- | --- |
 | 哔哩轻小说🏷 | JS 对空正则结果取 `[1]` | 搜索前置脚本依赖站点 guard 接口；单独只读检查曾得 HTTP 403。先在有授权的浏览器/登录环境确认响应，再判断规则宿主差异 |
-| 哔哩轻小说•台 | JVM 需要 WebView；Android 搜索为 0 | 模拟器 WebView 对“无职转生”拿到 HTTP 200、61,963 字符、标题 `Programmable Search Engine`，但立即解析 0 条。可能是 Google CSE 动态结果尚未出现，也可能未返回站内作品；不能标为搜索兼容。该源的 `bookList` 还需 `java.setContent/getString` 宿主，命中时才能验证 |
+| 哔哩轻小说•台 | JVM 需要 WebView；Android 搜索为 0 | 模拟器 WebView 对“无职转生”拿到 HTTP 200、标题 `Programmable Search Engine`，默认延时约 1 秒时 HTML 61,963 字符，额外延时 5 秒时 62,093 字符，均解析 0 条。单纯延长等待未解决；需检查 CSE 结果容器/站内索引与脚本加载状态，不能标为搜索兼容。该源的 `bookList` 还需 `java.setContent/getString` 宿主，命中时才能验证 |
 | 轻之文库轻小说 | TLS 握手由远端终止 | 本环境网络失败；需换正常授权网络复测，不能推断规则语法 |
 | 三七轻小说 | `java.getElement` 未提供 | 脚本宿主/DOM 元素对象模型缺口；源还有 `getString`、缓存文件、AES 与 Cookie 依赖，不能只补一个空壳方法 |
 | 轻小说文库 | 修复 URL 选项后，暴露 `cookie` 未定义 | 之前的 `MalformedJsonException` 是请求尾部 `@js:` 被误当 JSON；已补语法单测。下一步是共享 Cookie 宿主及登录/GBK 编码验证；站点曾跳转后 HTTP 403 |
@@ -43,13 +43,13 @@
 
 当前 11 源覆盖静态 HTML、动态 WebView、JSON API、JS 请求脚本、GBK/表单、登录 Cookie、字体/加密和漫画列表，但各类别并不均衡。后续若增加测试源，应从具有明确使用许可的独立来源补足 XPath、正则正文、多页目录、多页正文、POST 表单、正文图片与音频，而不是从当前 11 源重复抽相似书。新增源仍进入独立书源管理快照、按 URL 去重并保留来源与许可记录。
 
-Android 调试包内提供 `CompatibilityProbeActivity`，可通过 `adb shell am start` 传 `catalogUrl`、`sourceFilter`、`keyword`、`captureFirst`；`BookGetterProbe` 常规请求日志只记主机、状态、HTML 长度/标题和阶段结果，不保存正文与完整请求 URL（异常文本仍需谨慎处理，勿公开原始 logcat）。调试过程曾发现占位符正则的 `}}` 在 JVM 容忍、Android ICU 报错，现已转为显式 `\\}\\}`，两端核心测试与 Android 构建通过。官方 `BackstageWebView.kt` 会在页面完成后延时运行规则 JS，并对空值重试；本工程当前在 `onPageFinished` 立即取 HTML，动态搜索结果存在竞态，需设计可配置完成条件/超时而非固定长睡眠。
+Android 调试包内提供 `CompatibilityProbeActivity`，可通过 `adb shell am start` 传 `catalogUrl`、`sourceFilter`、`keyword`、`captureFirst`，另可用 `--el webViewDelayMillis 5000` 做等待时间对照；`BookGetterProbe` 常规请求日志只记主机、状态、HTML 长度/标题和阶段结果，不保存正文与完整请求 URL（异常文本仍需谨慎处理，勿公开原始 logcat）。调试过程曾发现占位符正则的 `}}` 在 JVM 容忍、Android ICU 报错，现已转为显式 `\\}\\}`。官方 `BackstageWebView.kt` 对无 `webJs` 的请求默认在 `onPageFinished` 后约 1 秒取结果，支持 `webViewDelayTime`；本工程现已对齐这个默认时间并传递延时选项。CSE 页面即使再等 5 秒仍为 0，不能继续仅靠增加固定等待猜测；要补 DOM 就绪/网络错误的可观测性。
 
 模拟器对照（同一快照，2026-09-27）：
 
 | 书源/词 | 响应 | 阶段结果 | 结论 |
 | --- | --- | --- | --- |
-| 哔哩轻小说•台 / 无职转生 | WebView 200，HTML 61,963 字符，Google CSE 标题 | 搜索 0 | HTML 存在不代表动态结果已就绪；尚未验证规则列表宿主 |
+| 哔哩轻小说•台 / 无职转生 | WebView 200；默认约 1 秒 HTML 61,963 字符，额外 5 秒 62,093 字符，Google CSE 标题 | 两次搜索均 0 | 延时并未产生规则匹配结果；尚未验证列表宿主或确认 CSE 是否索引该词 |
 | ESJ Zone / 無職轉生 | 请求超时 | 停在搜索请求 | 网络/站点可达性待复测 |
 | 轻小说机翻🤖 / 无职转生 | API 各阶段均 200 | 搜索 20、详情、目录 23、首章 7,945 字符 | Android 上 JSON/JS 路径的正对照；不据此推断其他书源 |
 | rezero / RE0 | 搜索经百度跳转，正文在站点自身，均 200 | 搜索 1、详情、目录 887、首章 1,979 字符 | Android 上跨域请求/静态 HTML 路径的正对照 |

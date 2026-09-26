@@ -132,6 +132,17 @@ final class SourceEngineTest {
                 + java.net.URLEncoder.encode("无职", java.nio.charset.Charset.forName("GBK")), chinese.url());
     }
 
+    @Test void webViewDelayOptionSurvivesRequestPlanning() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","searchUrl":"/search,{\\\"webView\\\":true,\\\"webViewDelayTime\\\":2500}"}
+            """).sources().get(0);
+        FetchRequest request = new RequestPlanner(new RhinoRuntime(unused ->
+                new FetchResponse(unused.url(), "", 200, Map.of())))
+                .plan(source.string("searchUrl"), source, "book", 1, source.id());
+        assertTrue(request.webView());
+        assertEquals(2500, request.webViewDelayMillis());
+    }
+
     @Test void requestPlanningFailureIsAttributedToSearchUrl() {
         Source source = SourceImporter.parse("""
             {"bookSourceUrl":"https://example.test","searchUrl":"@js:missingHostMethod()"}

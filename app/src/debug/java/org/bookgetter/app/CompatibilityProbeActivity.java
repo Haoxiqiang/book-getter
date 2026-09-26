@@ -26,6 +26,7 @@ public final class CompatibilityProbeActivity extends Activity {
         String sourceFilter = getIntent().getStringExtra("sourceFilter");
         String keyword = getIntent().getStringExtra("keyword");
         boolean captureFirst = getIntent().getBooleanExtra("captureFirst", false);
+        long webViewDelayOverride = getIntent().getLongExtra("webViewDelayMillis", -1);
         if (catalogUrl == null || sourceFilter == null || keyword == null) {
             Log.e(TAG, "ARG_ERROR catalogUrl, sourceFilter and keyword are required");
             finish();
@@ -39,6 +40,9 @@ public final class CompatibilityProbeActivity extends Activity {
                         .filter(item -> item.id().contains(sourceFilter) || item.name().contains(sourceFilter))
                         .findFirst().orElseThrow(() -> new IllegalArgumentException("No source: " + sourceFilter));
                 Transport observed = request -> {
+                    if (request.webView() && webViewDelayOverride >= 0)
+                        request = new FetchRequest(request.url(), request.method(), request.headers(), request.body(),
+                                request.charset(), true, webViewDelayOverride);
                     FetchResponse response = transport.fetch(request);
                     String body = response.body() == null ? "" : response.body();
                     String title = "";

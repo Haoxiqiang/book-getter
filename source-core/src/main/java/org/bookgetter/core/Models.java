@@ -41,8 +41,11 @@ public final class Models {
     public record Chapter(String bookUrl, String url, String title, int index, boolean volume, boolean vip) {}
     public record Resource(String url, String title, String mimeHint) {}
     public record ChapterContent(Chapter chapter, Kind kind, String text, List<Resource> resources) {}
-    public record FetchRequest(String url, String method, Map<String, String> headers, String body, String charset, boolean webView) {
-        public FetchRequest(String url) { this(url, "GET", Map.of(), null, null, false); }
+    public record FetchRequest(String url, String method, Map<String, String> headers, String body, String charset,
+                               boolean webView, long webViewDelayMillis) {
+        public FetchRequest(String url) { this(url, "GET", Map.of(), null, null, false, 0); }
+        public FetchRequest(String url, String method, Map<String, String> headers, String body, String charset,
+                            boolean webView) { this(url, method, headers, body, charset, webView, 0); }
     }
     public record FetchResponse(String url, String body, int status, Map<String, String> headers) {}
     public record SearchResult(List<BookHit> hits, Map<String, String> errors) {}
