@@ -63,6 +63,36 @@ final class SourceEngineTest {
                 source.id(), source, false));
     }
 
+    @Test void safeDomSelectAndHasClassDriveVipCatalogRule() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","ruleToc":{
+              "chapterList":"li.chapter","chapterName":"a@text","chapterUrl":"a@href",
+              "isVip":"@js:result.select('a').hasClass('isvip')"}}
+            """).sources().get(0);
+        Transport transport = request -> new FetchResponse(request.url(), """
+            <ul><li class='chapter'><a href='/one' class='name'>One</a></li>
+                <li class='chapter'><a href='/two' class='name isvip'>Two</a></li></ul>
+            """, 200, Map.of());
+        RhinoRuntime runtime = new RhinoRuntime(transport);
+        SourceEngine engine = new SourceEngine(transport, runtime);
+        BookHit hit = new BookHit(source.id(), "https://example.test/book", "Book", "", "", "", Kind.TEXT);
+        List<Chapter> chapters = engine.chapters(source, new BookDetail(hit,
+                "https://example.test/catalog", List.of()));
+        assertEquals(2, chapters.size());
+        assertFalse(chapters.get(0).vip());
+        assertTrue(chapters.get(1).vip());
+        Object node = org.jsoup.Jsoup.parse("<li class='chapter'><a href='/two' class='isvip'>Two</a></li>")
+                .selectFirst("li");
+        assertEquals(true, runtime.evaluate("result.hasClass('chapter') && result.select('a').hasClass('isvip')",
+                Map.of("result", node), source));
+        assertEquals("/two", runtime.evaluate("result.select('a').first().attr('href')",
+                Map.of("result", node), source));
+        assertEquals(1, runtime.evaluate("var selected=result.select('a'); selected.length=0; selected.length",
+                Map.of("result", node), source));
+        assertEquals("undefined", runtime.evaluate("typeof result.select('a').getClass",
+                Map.of("result", node), source));
+    }
+
     @Test void embeddedScriptCanFeedJsonPathInListAndFieldRules() {
         Source source = SourceImporter.parse("""
             {"bookSourceUrl":"https://chain.test","searchUrl":"/search?q={{key}}",

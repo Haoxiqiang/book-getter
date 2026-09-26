@@ -19,6 +19,7 @@ import org.mozilla.javascript.Scriptable;
 import org.mozilla.javascript.ScriptableObject;
 import org.mozilla.javascript.Undefined;
 import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
 
 /** A narrow JS host. Unknown Legado java.* methods raise normal JS errors. */
 public final class RhinoRuntime implements ScriptRuntime {
@@ -273,23 +274,7 @@ public final class RhinoRuntime implements ScriptRuntime {
 
     private void bind(Context cx, Scriptable scope, String name, Object value) {
         if (value instanceof Element element) {
-            Scriptable view = cx.newObject(scope);
-            ScriptableObject.putProperty(view, "attr", new BaseFunction() {
-                @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
-                    return element.attr(args.length == 0 ? "" : Context.toString(args[0]));
-                }
-            });
-            ScriptableObject.putProperty(view, "hasAttr", new BaseFunction() {
-                @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
-                    return element.hasAttr(args.length == 0 ? "" : Context.toString(args[0]));
-                }
-            });
-            ScriptableObject.putProperty(view, "text", stringMethod(element::text));
-            ScriptableObject.putProperty(view, "ownText", stringMethod(element::ownText));
-            ScriptableObject.putProperty(view, "html", stringMethod(element::html));
-            ScriptableObject.putProperty(view, "outerHtml", stringMethod(element::outerHtml));
-            ScriptableObject.putProperty(view, "toString", stringMethod(element::outerHtml));
-            ScriptableObject.putProperty(scope, name, view);
+            ScriptableObject.putProperty(scope, name, elementView(cx, scope, element));
             return;
         }
         Object jsValue = cx.evaluateString(scope, "(" + gson.toJson(value) + ")", "binding:" + name, 1, null);
@@ -301,6 +286,73 @@ public final class RhinoRuntime implements ScriptRuntime {
             }, ScriptableObject.DONTENUM);
         }
         ScriptableObject.putProperty(scope, name, jsValue);
+    }
+
+    private static Scriptable elementView(Context context, Scriptable scope, Element element) {
+        Scriptable view = context.newObject(scope);
+        ScriptableObject.putProperty(view, "attr", new BaseFunction() {
+            @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
+                return element.attr(args.length == 0 ? "" : Context.toString(args[0]));
+            }
+        });
+        ScriptableObject.putProperty(view, "hasAttr", new BaseFunction() {
+            @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
+                return element.hasAttr(args.length == 0 ? "" : Context.toString(args[0]));
+            }
+        });
+        ScriptableObject.putProperty(view, "hasClass", new BaseFunction() {
+            @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
+                return element.hasClass(args.length == 0 ? "" : Context.toString(args[0]));
+            }
+        });
+        ScriptableObject.putProperty(view, "select", new BaseFunction() {
+            @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
+                return elementsView(context, callScope,
+                        element.select(args.length == 0 ? "" : Context.toString(args[0])));
+            }
+        });
+        ScriptableObject.putProperty(view, "text", stringMethod(element::text));
+        ScriptableObject.putProperty(view, "ownText", stringMethod(element::ownText));
+        ScriptableObject.putProperty(view, "html", stringMethod(element::html));
+        ScriptableObject.putProperty(view, "outerHtml", stringMethod(element::outerHtml));
+        ScriptableObject.putProperty(view, "toString", stringMethod(element::outerHtml));
+        return view;
+    }
+
+    private static Scriptable elementsView(Context context, Scriptable scope, Elements elements) {
+        Scriptable view = context.newObject(scope);
+        ((ScriptableObject) view).defineProperty("length", elements.size(),
+                ScriptableObject.READONLY | ScriptableObject.PERMANENT);
+        ScriptableObject.putProperty(view, "size", new BaseFunction() {
+            @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
+                return elements.size();
+            }
+        });
+        ScriptableObject.putProperty(view, "hasClass", new BaseFunction() {
+            @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
+                return elements.hasClass(args.length == 0 ? "" : Context.toString(args[0]));
+            }
+        });
+        ScriptableObject.putProperty(view, "select", new BaseFunction() {
+            @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
+                return elementsView(context, callScope,
+                        elements.select(args.length == 0 ? "" : Context.toString(args[0])));
+            }
+        });
+        ScriptableObject.putProperty(view, "first", new BaseFunction() {
+            @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
+                Element first = elements.first();
+                return first == null ? null : elementView(context, callScope, first);
+            }
+        });
+        ScriptableObject.putProperty(view, "attr", new BaseFunction() {
+            @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
+                return elements.attr(args.length == 0 ? "" : Context.toString(args[0]));
+            }
+        });
+        ScriptableObject.putProperty(view, "text", stringMethod(elements::text));
+        ScriptableObject.putProperty(view, "toString", stringMethod(elements::toString));
+        return view;
     }
 
     private static BaseFunction stringMethod(java.util.function.Supplier<String> action) {

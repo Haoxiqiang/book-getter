@@ -25,13 +25,15 @@
 6. JS 宿主是受控兼容层：`java.ajax/get/put`、Cookie、源/书/章节变量、转换/编码/时间函数、`source`、`book`、`chapter` 等必须有生命周期和上下文。不能把任意 Java 类暴露给书源脚本；未知方法应给出字段、阶段、方法名诊断。当前 `source-core` 只实现其中一部分；`java.getElement/getElements/getString/setContent` 仅有 HTML 字符串兼容子集，`java.t2s` 仍是原文返回的占位，不能宣称完全兼容。[宜搜样本](header-and-search-item-variable-probe.md)已验证每个搜索项的 `@put` 变量快照随书进入目录，以及 JS 引号中的模板先展开；不等于变量持久化/并发宿主全部等价。官方接口参见 [JsExtensions.kt](../../app/src/main/java/io/legado/app/help/JsExtensions.kt) 和 `AnalyzeRule.put/get`。
 7. XPath 作为列表规则须保留元素节点，以便后续 `text/href` 等字段继续取值；`//...[@class=...]` 内的 `@` 不代表 CSS 动作。`href<js>…</js>` 是字段结果再执行脚本。搜索的非关键元数据字段解析失败不能吞掉已有书名/地址，但须留下诊断。[黑岩 XPath/可选字段探针](xpath-and-optional-fields-probe.md)在 JVM 与 Android 均验证到目录，VIP 标记数量与公开页面同数；手机小说的规则/页面结构漂移则用指定详情页直接定位。正文、VIP 可访问性和混合模式并未据此通过。
 8. 详情页的分类、字数、最新章、简介、封面也是可选字段；异常不能遮蔽有效目录地址，且应留下字段告警。书名、作者、目录地址仍是失败可见字段。官方依据为 `BookInfo.kt` 的逐字段 `try/catch`；[速读谷四页目录探针](sudugu-paged-catalog-probe.md)提供真实站点与 Android/JVM 对照，但显式跳过了搜索、未抓正文。
-9. JS 规则接在 DOM 列表之后时，`result` 必须保留节点语义，不能一律降成外层 HTML 字符串。受控宿主只暴露已验证的方法，不开放真实 Java 类；[rezero 卷规则探针](dom-node-js-probe.md)以 `result.attr('href')` 在 Android/JVM 均核对 23 个卷标题和 887 个普通章节。节点 `select/hasClass`、列表对象和混合链仍需另测。
+9. JS 规则接在 DOM 列表之后时，`result` 必须保留节点语义，不能一律降成外层 HTML 字符串。受控宿主只暴露已验证的方法，不开放真实 Java 类；[rezero 卷规则探针](dom-node-js-probe.md)以 `result.attr('href')` 在 Android/JVM 均核对 23 个卷标题和 887 个普通章节。节点 `select/hasClass` 已由经致文学目录正对照，其他列表对象和混合链仍需另测。
 
 补充的[混合 JS/JSONPath 探针](mixed-js-jsonpath-probe.md)纠正了先前对 `{$.字段}` 的误读：官方 `AnalyzeByJSonPath.getString` 支持内嵌取值，`AnalyzeRule.splitSourceRule` 允许 `<js>...</js>` 后继续 JSONPath。JSON Map 上的 `href/text` 动作若不存在，必须返回空以允许 `||` 回退，不能把整张 Map 字符串化为有效 URL；但 JS 显式 `String(result)` 又可能依赖官方 Map 的字符串视图。两者要区分，且不开放 Java 反射。含 `,{URL选项}` 的相对章节链接只解析路径部分，保留选项供请求规划使用。
 
 [夜伴书屋探针](url-first-and-pagination-probe.md)进一步确认官方 `AnalyzeRule.getString(..., isUrl=true)` 对默认 DOM 规则调用 `AnalyzeByJSoup.getString0`：同一列表项有多个匹配链接时只取首个 URL，而非合并。分页规则若精确返回已知书籍/目录 URL，本工程作为安全扩展停止并告警 `PAGINATION_TO_CATALOG`；这与官方主要使用“下一章 URL”作边界的行为不能混同。
 
 [`java.post` 探针](java-post-redirect-probe.md)按官方 `JsExtensions.post` 的 `followRedirects(false)`、原始 body/头和响应 `header("Location")` 补受控子集。该返回值不能复用只给正文字符串的 `java.ajax`；普通书源请求继续按原策略跟跳转。真实起舞中文被 TLS 阻断，只有合成规则和本地 302 证明此子集，不能宣称官方完整 `Connection.Response` 宿主已实现。
+
+[经致文学目录探针](dom-select-vip-probe.md)以真实 `ruleToc.isVip` 补 `Element.select → Elements.hasClass` 的受控 JS 视图，并在 JVM/Android 与公开目录的 12 链接、9 个 `isvip` 标签对照。节点/集合可用方法仍是白名单，不开放 Java 类反射；此目录标记不能推断付费正文可取。
 
 ## 可执行测试矩阵
 
