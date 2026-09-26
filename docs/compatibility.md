@@ -10,7 +10,7 @@
 | 详情、目录、正文 | 已实现基础链路 | `ruleBookInfo.init` 的 JSON 对象与 JS 字符串基础路径已测试；目录与正文下一页最多 50 页；传入目录中已知的下一章 URL 后，正文分页在其边界停止；拒绝已识别的升级占位正文；不执行预更新脚本和付费动作 |
 | CSS、XPath、JSONPath、正则 | 基础子集 | 支持单段选取与 `@text/@html/@href` 等单动作；列表元素上可直接用 `text`、`href`、`src`；`tag.a.0`、`tag.span.-1`、`tag.tr!0` 基础 DOM 索引已由真实源及合成测试验证，`[]` 区间仍未实现；顶层 `&&/||/%%` 有合成回归且避开 JSONPath 过滤器内部运算符，但尚未证明所有混合模式和复杂后置替换等价；普通替换正则默认不跨行 |
 | 规则内 JS、`mainJs` | 基础子集 | Rhino 执行，支持部分 ES6、`jsLib`、`<js>` 和受控的 `java.ajax/get/put/timeFormatUTC`；`java.t2s` 仍是原文返回占位。`mainJs` 支持 search/getBookInfo/getChapters/getContent，`getBookInfo` 可省略；详情字段会合并到搜索结果。`@put/@get` 仅实现详情以后书籍作用域的基础链，宿主对象和完整变量生命周期尚不等价于 Legado |
-| 手动登录、Cookie、WebView | 已实现基础链路 | HTTP 跳转链共享 Android Cookie；WebView 请求仅 GET，登录验证、WebJs、验证码处理未实现 |
+| 手动登录、Cookie、WebView | 已实现基础链路 | HTTP 跳转链共享 Android Cookie；URL 选项 `webView` 按官方“非空且非 false”语义判断，思路客②非标准引号规则已在 JVM/Android 分别核对请求路径；WebView 请求仅 GET，登录验证、WebJs、验证码处理未实现。该站首章重定向到无关域名，正文未通过 |
 | TXT/EPUB 导出 | 已实现 | 仅文本章节；EPUB 是最小 EPUB 2，暂不含封面、插图或复杂排版 |
 | 漫画/音频/视频/文件 | 基础资源获取与按需下载 | 漫画从正文 HTML 的 `img[src]` 提取并可打包 ZIP；音视频取第一个解析链接；文件源展示下载链接并可选一个下载。现在拒绝无图片章及非 HTTP(S) 的假资源链接；尚不处理 `sourceRegex` 的 WebView 媒体监听、媒体流清单、分段流或解密 |
 | 断点继续与取消 | 基础实现 | 成功章节逐章缓存；失败章节在下次导出时重抓；任务状态未跨进程持久化 |

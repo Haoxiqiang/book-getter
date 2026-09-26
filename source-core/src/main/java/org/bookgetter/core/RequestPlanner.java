@@ -87,7 +87,7 @@ public final class RequestPlanner {
             webViewDelay = Math.max(0, options.get("webViewDelayTime").getAsLong());
         return new FetchRequest(RuleEvaluator.absolute(base, rawUrl), method, headers,
                 body, charsetName,
-                options != null && options.has("webView") && options.get("webView").getAsBoolean(), webViewDelay);
+                useWebView(options), webViewDelay);
     }
 
     private static String encodeForm(String body, Charset charset) {
@@ -109,6 +109,14 @@ public final class RequestPlanner {
 
     private static String option(JsonObject object, String key, String fallback) {
         return object == null || !object.has(key) || object.get(key).isJsonNull() ? fallback : object.get(key).getAsString();
+    }
+
+    /** Legado UrlOption.useWebView treats any non-empty value other than false as enabled. */
+    private static boolean useWebView(JsonObject options) {
+        if (options == null || !options.has("webView") || options.get("webView").isJsonNull()) return false;
+        if (!options.get("webView").isJsonPrimitive()) return true;
+        String value = options.get("webView").getAsString();
+        return !value.isEmpty() && !value.equals("false");
     }
 
     private static String bodyOption(JsonObject options) {

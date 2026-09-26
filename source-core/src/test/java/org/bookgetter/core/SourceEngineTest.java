@@ -42,6 +42,18 @@ final class SourceEngineTest {
         assertEquals("Second", hits.get(1).name());
     }
 
+    @Test void chapterUrlWithSourceOptionsResolvesAgainstCatalogUrl() {
+        Source source = SourceImporter.parse(sourceJson).sources().get(0);
+        RequestPlanner planner = new RequestPlanner(new RhinoRuntime(request ->
+                new FetchResponse(request.url(), "", 200, Map.of())));
+        FetchRequest request = planner.plan("/html/92696/33648343.html,{webView:“true”}",
+                source, "", 1, "http://www.isiluke.la/html/92696/");
+        assertEquals("http://www.isiluke.la/html/92696/33648343.html", request.url());
+        assertTrue(request.webView());
+        assertFalse(planner.plan("/chapter,{\"webView\":\"false\"}", source, "", 1,
+                "http://www.isiluke.la/html/92696/").webView());
+    }
+
     @Test void importSearchDetailCatalogContent() {
         Source source = SourceImporter.parse(sourceJson).sources().get(0);
         Transport transport = request -> {

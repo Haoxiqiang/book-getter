@@ -73,6 +73,9 @@ public final class LiveSourceProbe {
             String host;
             try { host = URI.create(response.url()).getHost(); }
             catch (Exception ignored) { host = "invalid-url"; }
+            String requestHost;
+            try { requestHost = URI.create(request.url()).getHost(); }
+            catch (Exception ignored) { requestHost = "invalid-url"; }
             String redirectHost = "";
             if (quality.equals("UNRESOLVED_REDIRECT")) {
                 String location = response.headers().getOrDefault("location", "");
@@ -80,7 +83,9 @@ public final class LiveSourceProbe {
                 catch (Exception ignored) { redirectHost = "invalid-url"; }
             }
             System.out.println(row("FETCH", host, Integer.toString(response.status()),
-                    Integer.toString(body.length()), title, quality + (redirectHost.isBlank() ? "" : " to=" + redirectHost)));
+                    Integer.toString(body.length()), title, quality
+                            + (host.equals(requestHost) ? "" : " from=" + requestHost)
+                            + (redirectHost.isBlank() ? "" : " to=" + redirectHost)));
             return response;
         };
         String snapshot;

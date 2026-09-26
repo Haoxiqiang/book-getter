@@ -55,8 +55,12 @@ public final class CompatibilityProbeActivity extends Activity {
                     String host;
                     try { host = new java.net.URI(response.url()).getHost(); }
                     catch (Exception ignored) { host = "invalid-url"; }
+                    String requestHost;
+                    try { requestHost = new java.net.URI(request.url()).getHost(); }
+                    catch (Exception ignored) { requestHost = "invalid-url"; }
                     Log.i(TAG, clean("FETCH method=" + request.method() + " webView=" + request.webView()
                             + " status=" + response.status() + " host=" + host
+                            + (host.equals(requestHost) ? "" : " from=" + requestHost)
                             + " length=" + body.length() + " quality=" + quality + " title=" + title));
                     return response;
                 };
