@@ -27,11 +27,14 @@ public final class CompatibilityProbeActivity extends Activity {
         String catalogUrl = getIntent().getStringExtra("catalogUrl");
         String sourceFilter = getIntent().getStringExtra("sourceFilter");
         String keyword = getIntent().getStringExtra("keyword");
+        String directBookUrl = getIntent().getStringExtra("directBookUrl");
         boolean captureFirst = getIntent().getBooleanExtra("captureFirst", false);
         boolean catalogFirst = getIntent().getBooleanExtra("catalogFirst", false);
+        boolean directCatalogOnly = directBookUrl != null && !captureFirst;
         int readableChapterIndex = getIntent().getIntExtra("chapterIndex", 0);
         long webViewDelayOverride = getIntent().getLongExtra("webViewDelayMillis", -1);
-        if (catalogUrl == null || sourceFilter == null || keyword == null || readableChapterIndex < 0) {
+        if (catalogUrl == null || sourceFilter == null || keyword == null || readableChapterIndex < 0
+                || (directBookUrl != null && !validHttpBookUrl(directBookUrl))) {
             Log.e(TAG, "ARG_ERROR catalogUrl, sourceFilter, keyword and nonnegative chapterIndex are required");
             finish();
             return;
@@ -78,14 +81,16 @@ public final class CompatibilityProbeActivity extends Activity {
                 });
                 Log.i(TAG, clean("START " + source.name() + " " + source.id() + " key=" + keyword));
                 int searchQualityStart = responseQualities.size();
-                List<BookHit> hits = engine.search(source, keyword, 1);
+                List<BookHit> hits = directBookUrl == null ? engine.search(source, keyword, 1)
+                        : List.of(new BookHit(source.id(), directBookUrl, directBookUrl,
+                                "", "", "", source.kind()));
                 boolean suspectSearch = responseQualities.subList(searchQualityStart, responseQualities.size()).stream()
                         .anyMatch(ResponseSignals::suspectEmptySearch);
-                String searchStatus = hits.isEmpty()
+                String searchStatus = directBookUrl != null ? "SEARCH_SKIPPED_DIRECT_BOOK" : hits.isEmpty()
                         ? (suspectSearch ? "SEARCH_RESPONSE_SUSPECT" : "SEARCH_ZERO_UNVERIFIED") : "SEARCH_OK";
                 Log.i(TAG, clean(searchStatus
                         + " hits=" + hits.size() + (hits.isEmpty() ? "" : " first=" + hits.get(0).name())));
-                if ((captureFirst || catalogFirst) && !hits.isEmpty()) {
+                if ((captureFirst || catalogFirst || directCatalogOnly) && !hits.isEmpty()) {
                     int qualityStart = responseQualities.size();
                     BookDetail detail = engine.detail(source, hits.get(0));
                     boolean suspect = responseQualities.subList(qualityStart, responseQualities.size()).stream()
@@ -98,7 +103,7 @@ public final class CompatibilityProbeActivity extends Activity {
                     Log.i(TAG, clean("CATALOG_OK chapters=" + chapters.size()
                             + " vip=" + vipCount
                             + (chapters.isEmpty() ? "" : " firstUrl=" + chapters.get(0).url())));
-                    if (catalogFirst) return;
+                    if (catalogFirst || directCatalogOnly) return;
                     List<Chapter> readableChapters = chapters.stream().filter(chapter -> !chapter.volume()).toList();
                     if (readableChapterIndex >= readableChapters.size())
                         throw new IllegalArgumentException("Readable chapter index " + readableChapterIndex
@@ -132,4 +137,12 @@ public final class CompatibilityProbeActivity extends Activity {
     }
 
     private static String clean(String text) { return text.replaceAll("[\\r\\n\\t]+", " "); }
+
+    private static boolean validHttpBookUrl(String value) {
+        try {
+            java.net.URI uri = java.net.URI.create(value);
+            return (uri.getScheme().equalsIgnoreCase("https") || uri.getScheme().equalsIgnoreCase("http"))
+                    && uri.getHost() != null && uri.getUserInfo() == null;
+        } catch (Exception ignored) { return false; }
+    }
 }

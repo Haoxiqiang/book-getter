@@ -151,7 +151,10 @@ public final class LiveSourceProbe {
                     if (captureFirst && !hits.isEmpty()) {
                         try {
                             int detailQualityStart = responseQualities.size();
+                            fieldWarnings.clear();
                             BookDetail detail = engine.detail(source, hits.get(0));
+                            fieldWarnings.stream().map(Diagnostic::field).distinct().forEach(field ->
+                                    System.out.println(row(source.name(), keyword, "FIELD_WARNING", "", "", field)));
                             boolean suspect = responseQualities.subList(detailQualityStart, responseQualities.size()).stream()
                                     .anyMatch(value -> value.equals("BUSINESS_ERROR") || value.equals("CHALLENGE_PAGE")
                                             || value.equals("PARKED_DOMAIN") || value.equals("APP_UPGRADE_REQUIRED"));

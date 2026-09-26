@@ -24,6 +24,7 @@
 5. HTML 的 `@text`、`@ownText`、`@html`、`@href/@src`、`@textNodes`、`@all`、位置索引、属性和节点组合应区分“返回节点列表”和“返回字段字符串”；列表字段可以直接使用动作。`@textNodes` 取直属文本；`@all` 取原外层 HTML；`@html` 去掉所选节点中的 script/style 后取外层 HTML。[ESJ 的 `@all`](dom-actions-probe.md)与[抖音小说的 `@html`](html-action-probe.md)各有一章 Android/JVM 正对照，但不等于全文净化通过。尤其 `tag.a.0`、`tag.span.-1`、`tag.tr!0` 是 Legado 位置索引/排除语法而非 CSS 类名；[跨站广度探针](diverse-source-search-probe.md)曾因此把真实搜索误判为 0。`tag.span[0:1]` 等方括号索引已按[真实规则样本](bracket-index-and-metadata.md)补离线回归，但样本站点仍被网络阻断。XPath 不带前缀的 `//a` 应匹配 HTML 元素；JSONPath 缺省字段不应让整本搜索失败。具体 CSS 能力应以官方 `AnalyzeByJSoup` 和所用 jsoup 版本测试为准，不把 skill 里的“禁用某些伪类”口号当作全部模式的硬性语法限制。
 6. JS 宿主是受控兼容层：`java.ajax/get/put`、Cookie、源/书/章节变量、转换/编码/时间函数、`source`、`book`、`chapter` 等必须有生命周期和上下文。不能把任意 Java 类暴露给书源脚本；未知方法应给出字段、阶段、方法名诊断。当前 `source-core` 只实现其中一部分；`java.getElement/getElements/getString/setContent` 仅有 HTML 字符串兼容子集，`java.t2s` 仍是原文返回的占位，不能宣称完全兼容。官方接口参见 [JsExtensions.kt](../../app/src/main/java/io/legado/app/help/JsExtensions.kt) 和 `AnalyzeRule.put/get`。
 7. XPath 作为列表规则须保留元素节点，以便后续 `text/href` 等字段继续取值；`//...[@class=...]` 内的 `@` 不代表 CSS 动作。`href<js>…</js>` 是字段结果再执行脚本。搜索的非关键元数据字段解析失败不能吞掉已有书名/地址，但须留下诊断。[黑岩 XPath/可选字段探针](xpath-and-optional-fields-probe.md)在 JVM 与 Android 均验证到目录，VIP 标记数量与公开页面同数；手机小说的规则/页面结构漂移则用指定详情页直接定位。正文、VIP 可访问性和混合模式并未据此通过。
+8. 详情页的分类、字数、最新章、简介、封面也是可选字段；异常不能遮蔽有效目录地址，且应留下字段告警。书名、作者、目录地址仍是失败可见字段。官方依据为 `BookInfo.kt` 的逐字段 `try/catch`；[速读谷四页目录探针](sudugu-paged-catalog-probe.md)提供真实站点与 Android/JVM 对照，但显式跳过了搜索、未抓正文。
 
 ## 可执行测试矩阵
 

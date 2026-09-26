@@ -791,6 +791,53 @@ final class SourceEngineTest {
         assertEquals("OPTIONAL_FIELD_ERROR", warnings.get(0).code());
     }
 
+    @Test void failingOptionalDetailFieldDoesNotHideCatalogUrl() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://detail.test","ruleBookInfo":{
+             "name":"h1@text","tocUrl":"a.catalog@href",
+             "wordCount":"script@text@js:result.textContent.match(/[0-9]+/)[0]"}}
+            """).sources().get(0);
+        java.util.ArrayList<Diagnostic> warnings = new java.util.ArrayList<>();
+        Transport transport = request -> new FetchResponse(request.url(), """
+            <h1>Fixture</h1><script>12345</script><a class='catalog' href='/toc'>Catalog</a>
+            """, 200, Map.of());
+        SourceEngine engine = new SourceEngine(transport, new RhinoRuntime(transport), warnings::add);
+        BookHit hit = new BookHit(source.id(), "https://detail.test/book", "Old", "", "", "", Kind.TEXT);
+        BookDetail detail = engine.detail(source, hit);
+        assertEquals("Fixture", detail.hit().name());
+        assertEquals("https://detail.test/toc", detail.tocUrl());
+        assertEquals("", detail.hit().wordCount());
+        assertEquals(1, warnings.size());
+        assertEquals("ruleBookInfo.wordCount", warnings.get(0).field());
+        assertEquals(Stage.DETAIL, warnings.get(0).stage());
+    }
+
+    @Test void pagedCatalogFollowsCssNextAndDeduplicatesChapterUrls() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://paged.test","ruleToc":{
+             "chapterList":"id.list.0@tag.a","chapterName":"text","chapterUrl":"href",
+             "nextTocUrl":"@css:#pages .gr:not([href='#'])@href"}}
+            """).sources().get(0);
+        java.util.ArrayList<String> fetched = new java.util.ArrayList<>();
+        SourceEngine engine = new SourceEngine(request -> {
+            fetched.add(request.url());
+            String page = request.url().endsWith("/2") ? """
+                <div id='list'><a href='/a'>A again</a><a href='/c'>C</a></div>
+                <div id='pages'><a class='gr' href='#'>End</a></div>
+                """ : """
+                <div id='list'><a href='/a'>A</a><a href='/b'>B</a></div>
+                <div id='pages'><a class='gr' href='/toc/2'>Next</a></div>
+                """;
+            return new FetchResponse(request.url(), page, 200, Map.of());
+        });
+        BookHit hit = new BookHit(source.id(), "https://paged.test/book", "Fixture", "", "", "", Kind.TEXT);
+        List<Chapter> chapters = engine.chapters(source,
+                new BookDetail(hit, "https://paged.test/toc/", List.of()));
+        assertEquals(List.of("https://paged.test/toc/", "https://paged.test/toc/2"), fetched);
+        assertEquals(List.of("https://paged.test/a", "https://paged.test/b", "https://paged.test/c"),
+                chapters.stream().map(Chapter::url).toList());
+    }
+
     @Test void xpathChapterHrefCanFeedEmbeddedJavaScript() {
         Source source = SourceImporter.parse("""
             {"bookSourceUrl":"https://chapter.test","ruleToc":{

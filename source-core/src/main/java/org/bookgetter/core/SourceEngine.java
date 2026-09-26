@@ -50,11 +50,11 @@ public final class SourceEngine {
                 if (name.isBlank() || url.isBlank()) continue;
                 hits.add(new BookHit(source.id(), url, name,
                         field(source, "ruleSearch", "author", item, response.url(), false),
-                        optionalSearchField(source, "intro", item, response.url(), false),
-                        optionalSearchField(source, "coverUrl", item, response.url(), true), source.kind(),
-                        optionalSearchField(source, "kind", item, response.url(), false),
-                        optionalSearchField(source, "wordCount", item, response.url(), false),
-                        optionalSearchField(source, "lastChapter", item, response.url(), false)));
+                        optionalField(source, "ruleSearch", "intro", item, response.url(), false),
+                        optionalField(source, "ruleSearch", "coverUrl", item, response.url(), true), source.kind(),
+                        optionalField(source, "ruleSearch", "kind", item, response.url(), false),
+                        optionalField(source, "ruleSearch", "wordCount", item, response.url(), false),
+                        optionalField(source, "ruleSearch", "lastChapter", item, response.url(), false)));
             }
             return hits;
         } catch (SourceFailure e) { throw e; }
@@ -78,11 +78,11 @@ public final class SourceEngine {
             }
             String name = field(source, "ruleBookInfo", "name", detailContent, response.url(), false);
             String author = field(source, "ruleBookInfo", "author", detailContent, response.url(), false);
-            String intro = field(source, "ruleBookInfo", "intro", detailContent, response.url(), false);
-            String cover = field(source, "ruleBookInfo", "coverUrl", detailContent, response.url(), true);
-            String genre = field(source, "ruleBookInfo", "kind", detailContent, response.url(), false);
-            String wordCount = field(source, "ruleBookInfo", "wordCount", detailContent, response.url(), false);
-            String lastChapter = field(source, "ruleBookInfo", "lastChapter", detailContent, response.url(), false);
+            String intro = optionalField(source, "ruleBookInfo", "intro", detailContent, response.url(), false);
+            String cover = optionalField(source, "ruleBookInfo", "coverUrl", detailContent, response.url(), true);
+            String genre = optionalField(source, "ruleBookInfo", "kind", detailContent, response.url(), false);
+            String wordCount = optionalField(source, "ruleBookInfo", "wordCount", detailContent, response.url(), false);
+            String lastChapter = optionalField(source, "ruleBookInfo", "lastChapter", detailContent, response.url(), false);
             String toc = field(source, "ruleBookInfo", "tocUrl", detailContent, response.url(), true);
             if (toc.isBlank()) toc = response.url();
             // An optional direct-download rule may only apply to one subtype of a mixed source.
@@ -295,10 +295,10 @@ public final class SourceEngine {
         catch (Exception e) { throw new SourceFailure(stage(section), source.id(), section + "." + field, e.getMessage(), e); }
     }
 
-    private String optionalSearchField(Source source, String name, Object input, String base, boolean url) {
-        try { return field(source, "ruleSearch", name, input, base, url); }
+    private String optionalField(Source source, String section, String name, Object input, String base, boolean url) {
+        try { return field(source, section, name, input, base, url); }
         catch (SourceFailure e) {
-            diagnostics.accept(new Diagnostic(Stage.SEARCH, "OPTIONAL_FIELD_ERROR", e.getMessage(),
+            diagnostics.accept(new Diagnostic(stage(section), "OPTIONAL_FIELD_ERROR", e.getMessage(),
                     Severity.WARNING, e.field));
             return "";
         }
