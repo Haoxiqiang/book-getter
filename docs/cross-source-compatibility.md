@@ -14,7 +14,7 @@
 | 三七轻小说 | JVM 未跟随 HTTPS→HTTP 的 302；Android HTTP 200 但只是域名出售页 | 已补 `java.getElement/getElements/getString/setContent` 的最小 HTML 宿主与离线回归，随后探针才暴露真实站点问题。JVM 搜索请求按探针 UA 跳到 `ww17.m.37yq.com` 的 HTTP 地址，不能再把空 302 算作零结果；Android 返回 975 字节、标题 `37yq.com` 的出售页，0 命中同样无效。复杂缓存/AES/Cookie 分支仍未被真实页面触发 |
 | 轻小说文库 | 修复 URL 选项后，暴露 `cookie` 未定义 | 之前的 `MalformedJsonException` 是请求尾部 `@js:` 被误当 JSON；已补语法单测。下一步是共享 Cookie 宿主及登录/GBK 编码验证；站点曾跳转后 HTTP 403 |
 | lk轻之国度 | `cookie.getKey` 缺失 | 搜索请求需用户 token 中的 `security_key`；未登录不能声称规则错误或零结果 |
-| rezero | 有效 0 命中 | 此站只收录 RE0 系，关键词不适用；用 `RE0` 已验证搜索 1 条、详情、887 章目录和首章 |
+| rezero | 有效 0 命中 | 此站只收录 RE0 系，关键词不适用；用 `RE0` 搜索 1 条、详情与[目录 910 条（23 卷标题+887 章）](dom-node-js-probe.md)已在 JVM/Android 重验；历史首章曾通过，不算本轮整书 |
 | 轻小说机翻🤖 | 20 条 | 搜索到首章、整书下载链路已实测；但不能代表其他 10 源 |
 | 真白萌 | HTTP 403 | 登录/站点防护边界；不绕过访问控制 |
 | ESJ Zone | 有效 0 命中，本轮未超时 | 需用站内确定收录的作品与 Android 环境再测；追加的 `無職轉生`、`異世界` 探针超时，不能以本轮 0 条证明整源可用 |
@@ -33,7 +33,7 @@
 
 书源规则字段还出现 `init`、`isVolume`、`isVip`、`payAction`、`replaceRegex`、`nextContentUrl`、`subContent`、`imageDecode` 等。当前 `SourceEngine` 只执行其中一部分；`replaceRegex` 已有合并后执行和私用区字体字符的合成测试、有度首章 JVM/Android 探针，但其全字体映射未获证明。例如再漫画的 `ruleBookInfo.init` 保存 `bid` 给章节 URL 使用，目录的 `isVolume` 标注卷，这两个机制已补离线测试，真实源仍被失效详情 URL 阻断。同一简单文本源的数十本书无法覆盖这些分支。
 
-本轮根据官方 `BookInfo.kt` 与 `BookChapterList.kt` 补齐了详情 `init` 先于其他字段执行、目录 `isVolume/isVip` 判断及无 URL 卷标题的稳定占位 URL；官方 `String?.isTrue` 仅把空、`null`、`false/no/not/0/0.0` 判为假。合成的漫画 JSON 回归验证 `init` 保存 `bid` 后被章节 URL 使用，并验证卷与 VIP 标记。此为**机制单测通过**，不是再漫画真实站点通过；`isPay` 仍未进入当前 `Chapter` 模型。
+早期根据官方 `BookInfo.kt` 与 `BookChapterList.kt` 补齐了详情 `init` 先于其他字段执行、目录 `isVolume/isVip` 判断及无 URL 卷标题的稳定占位 URL；官方 `String?.isTrue` 仅把空、`null`、`false/no/not/0/0.0` 判为假。合成漫画 JSON 回归验证 `init` 保存 `bid` 后被章节 URL 使用，但再漫画真实站点仍被失效详情 URL 阻断。之后 `isVolume` 已由 rezero、`isVip` 已由黑岩公开目录各自核对，不能反推再漫画可用；`isPay` 仍未进入当前 `Chapter` 模型。
 
 后续优先级：先让诊断区分请求/响应语义/规则字段；对 `@@`、默认选择器链、URL 后置 JS 建回归；接着实现受控 Cookie 与规则 JS 上下文，再在 Android 环境验证 WebView/登录。每次改动都以仓库内 Legado 官方实现核对；[上游 skill](../legadoSkill/README.md) 作为案例库，其部分章节对 `nextContentUrl` 的说法互相矛盾，不能直接当作规范。批量下载已按用户纠偏停止，已有 52 本离线有效文件保留在 Git 忽略目录中，100 本仅作为后续压力/整书验收，不替代跨站兼容测试。
 
@@ -55,6 +55,6 @@ Android 调试包内提供 `CompatibilityProbeActivity`，可通过 `adb shell a
 | 三七轻小说 / 无职转生 | JVM HTTP 302 到 HTTP 子域（未跟随），Android HTTP 200、975 字节域名出售页 | JVM 现报 `SEARCH.searchUrl` 未解决重定向；Android 表面 0 条 | 两种响应都不是书源搜索结果。`curl` 的普通 UA 可看到页面文案 `This domain may be for sale`；不要计作有效空结果 |
 | 再漫画 / 无职转生 | 搜索 HTML 200；详情 JSON 200 但 `errno=2` | 搜索 10，详情 `DETAIL_SUSPECT`，目录失败 | JVM/Android 均复现；HTTP 200 不等于业务成功，源规则的旧链接提取是上游失配 |
 | 轻小说机翻🤖 / 无职转生 | API 各阶段均 200 | 搜索 20、详情、目录 23、首章 7,945 字符 | Android 上 JSON/JS 路径的正对照；不据此推断其他书源 |
-| rezero / RE0 | 搜索经百度跳转，正文在站点自身，均 200 | 搜索 1、详情、目录 887、首章 1,979 字符 | Android 上跨域请求/静态 HTML 路径的正对照 |
+| rezero / RE0 | 搜索经百度跳转，正文在站点自身，均 200 | 搜索 1、详情、目录 910 条（23 卷标题+887 章）；历史首章 1,979 字符 | Android 上跨域请求/静态 HTML 路径的正对照；目录卷标记已重验，[记录](dom-node-js-probe.md) |
 
 Release 构建不包含调试 Activity（已检查合并清单）；`assembleRelease --offline` 因本地缺少 Android Lint 依赖失败，尚不能据此断言完整 Release 构建通过。

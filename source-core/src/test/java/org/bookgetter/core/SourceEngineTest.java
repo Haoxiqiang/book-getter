@@ -838,6 +838,32 @@ final class SourceEngineTest {
                 chapters.stream().map(Chapter::url).toList());
     }
 
+    @Test void catalogJsCanReadSelectedDomElementWithoutExposingJavaClass() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://dom-js.test","ruleToc":{
+             "chapterList":"a[href^='markdown/ch/']","chapterName":"text","chapterUrl":"href",
+             "isVolume":"@js:result.attr('href').endsWith('index.html')"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(), """
+            <a href='markdown/ch/volume/index.html'>Volume One</a>
+            <a href='markdown/ch/volume/one.html'>Chapter One</a>
+            """, 200, Map.of()));
+        BookHit hit = new BookHit(source.id(), "https://dom-js.test/book", "Fixture", "", "", "", Kind.TEXT);
+        List<Chapter> chapters = engine.chapters(source,
+                new BookDetail(hit, "https://dom-js.test/catalog", List.of()));
+        assertEquals(2, chapters.size());
+        assertTrue(chapters.get(0).volume());
+        assertFalse(chapters.get(1).volume());
+        assertEquals("https://dom-js.test/markdown/ch/volume/one.html", chapters.get(1).url());
+        RuleEvaluator evaluator = new RuleEvaluator(new RhinoRuntime(request ->
+                new FetchResponse(request.url(), "", 200, Map.of())));
+        Object node = evaluator.many("a", "<a href='/safe'>Safe</a>", source.id(), source).get(0);
+        assertEquals("/safe", evaluator.one("@js:result.attr('href')", node, source.id(), source, false));
+        assertEquals("undefined", evaluator.one("@js:typeof result.getClass", node, source.id(), source, false));
+        assertEquals("true", evaluator.one("@js:String(result).includes('<a href=')", node,
+                source.id(), source, false));
+    }
+
     @Test void xpathChapterHrefCanFeedEmbeddedJavaScript() {
         Source source = SourceImporter.parse("""
             {"bookSourceUrl":"https://chapter.test","ruleToc":{

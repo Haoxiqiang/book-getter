@@ -16,6 +16,7 @@ import org.mozilla.javascript.Context;
 import org.mozilla.javascript.Scriptable;
 import org.mozilla.javascript.ScriptableObject;
 import org.mozilla.javascript.Undefined;
+import org.jsoup.nodes.Element;
 
 /** A narrow JS host. Unknown Legado java.* methods raise normal JS errors. */
 public final class RhinoRuntime implements ScriptRuntime {
@@ -194,7 +195,35 @@ public final class RhinoRuntime implements ScriptRuntime {
     }
 
     private void bind(Context cx, Scriptable scope, String name, Object value) {
+        if (value instanceof Element element) {
+            Scriptable view = cx.newObject(scope);
+            ScriptableObject.putProperty(view, "attr", new BaseFunction() {
+                @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
+                    return element.attr(args.length == 0 ? "" : Context.toString(args[0]));
+                }
+            });
+            ScriptableObject.putProperty(view, "hasAttr", new BaseFunction() {
+                @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
+                    return element.hasAttr(args.length == 0 ? "" : Context.toString(args[0]));
+                }
+            });
+            ScriptableObject.putProperty(view, "text", stringMethod(element::text));
+            ScriptableObject.putProperty(view, "ownText", stringMethod(element::ownText));
+            ScriptableObject.putProperty(view, "html", stringMethod(element::html));
+            ScriptableObject.putProperty(view, "outerHtml", stringMethod(element::outerHtml));
+            ScriptableObject.putProperty(view, "toString", stringMethod(element::outerHtml));
+            ScriptableObject.putProperty(scope, name, view);
+            return;
+        }
         Object jsValue = cx.evaluateString(scope, "(" + gson.toJson(value) + ")", "binding:" + name, 1, null);
         ScriptableObject.putProperty(scope, name, jsValue);
+    }
+
+    private static BaseFunction stringMethod(java.util.function.Supplier<String> action) {
+        return new BaseFunction() {
+            @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
+                return action.get();
+            }
+        };
     }
 }

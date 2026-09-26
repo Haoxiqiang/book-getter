@@ -344,7 +344,7 @@ public final class RuleEvaluator {
     }
 
     private static Object scriptInput(Object input) {
-        return input instanceof Map<?, ?> ? input : input.toString();
+        return input instanceof Map<?, ?> || input instanceof Element ? input : input.toString();
     }
 
     private String expandTemplate(String template, Object input, String baseUrl, Source source) {

@@ -25,6 +25,7 @@
 6. JS 宿主是受控兼容层：`java.ajax/get/put`、Cookie、源/书/章节变量、转换/编码/时间函数、`source`、`book`、`chapter` 等必须有生命周期和上下文。不能把任意 Java 类暴露给书源脚本；未知方法应给出字段、阶段、方法名诊断。当前 `source-core` 只实现其中一部分；`java.getElement/getElements/getString/setContent` 仅有 HTML 字符串兼容子集，`java.t2s` 仍是原文返回的占位，不能宣称完全兼容。官方接口参见 [JsExtensions.kt](../../app/src/main/java/io/legado/app/help/JsExtensions.kt) 和 `AnalyzeRule.put/get`。
 7. XPath 作为列表规则须保留元素节点，以便后续 `text/href` 等字段继续取值；`//...[@class=...]` 内的 `@` 不代表 CSS 动作。`href<js>…</js>` 是字段结果再执行脚本。搜索的非关键元数据字段解析失败不能吞掉已有书名/地址，但须留下诊断。[黑岩 XPath/可选字段探针](xpath-and-optional-fields-probe.md)在 JVM 与 Android 均验证到目录，VIP 标记数量与公开页面同数；手机小说的规则/页面结构漂移则用指定详情页直接定位。正文、VIP 可访问性和混合模式并未据此通过。
 8. 详情页的分类、字数、最新章、简介、封面也是可选字段；异常不能遮蔽有效目录地址，且应留下字段告警。书名、作者、目录地址仍是失败可见字段。官方依据为 `BookInfo.kt` 的逐字段 `try/catch`；[速读谷四页目录探针](sudugu-paged-catalog-probe.md)提供真实站点与 Android/JVM 对照，但显式跳过了搜索、未抓正文。
+9. JS 规则接在 DOM 列表之后时，`result` 必须保留节点语义，不能一律降成外层 HTML 字符串。受控宿主只暴露已验证的方法，不开放真实 Java 类；[rezero 卷规则探针](dom-node-js-probe.md)以 `result.attr('href')` 在 Android/JVM 均核对 23 个卷标题和 887 个普通章节。节点 `select/hasClass`、列表对象和混合链仍需另测。
 
 ## 可执行测试矩阵
 
@@ -43,5 +44,5 @@
 - 优先完善官方模式识别与 URL 选项；再扩展 JS 宿主、变量作用域、Cookie/登录和编码。顶层 `&&/||/%%` 已补合并基础路径，并避免把 JSONPath 过滤器内部的同名运算符拆开，但混合模式未穷尽。正文 `replaceRegex` 已补“合并后执行”与默认不跨行的基础路径及 `<js>` 后接 `##` 测试；未证明所有真实字体映射正确。
 - Android WebView 要在模拟器/设备上独立验证；JVM 探针不能代替。遇到网站登录、403、CF、付费或频率限制时记录边界，不绕过访问控制。
 - 正文分页调用应传入目录里已知的下一章 URL；`nextContentUrl` 若指向该 URL 就停止本章合并。这与官方 `BookContent.analyzeContent` 的边界处理一致。只调用不带下一章参数的兼容接口时，无法保证这一边界。
-- `BookInfoRule.init` 已有 JS 字符串与 JSON 对象的 Java 回归，`TocRule.isVolume/isVip` 也有最小回归，但再漫画仍被上游 URL 失配阻断，猫眼则停在详情业务错误；都未完成真实端到端验证。`isPay`、内容净化和书源 `bookUrlPattern` 仍未完整实现。不能把合成夹具通过当作真实站点标记的证明。
+- `BookInfoRule.init` 已有 JS 字符串与 JSON 对象的 Java 回归；`TocRule.isVolume` 已由 rezero 公开目录对照验证、`isVip` 已由黑岩公开目录对照验证，但再漫画仍被上游 URL 失配阻断，猫眼则停在详情业务错误。`isPay`、内容净化和书源 `bookUrlPattern` 仍未完整实现。不能把一个站点的合成或目录正对照扩大为所有站点通过。
 - 当前优先目标是尽量发现跨站规则兼容问题：按**独立站点 × 不同规则机制 × 最深通过阶段**衡量覆盖。此前提出的 100 本量化验收可在兼容缺口收敛后作为压力测试，不能替代跨站验证；有未覆盖项时继续标记为未完成。

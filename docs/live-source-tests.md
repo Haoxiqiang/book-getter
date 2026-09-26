@@ -64,7 +64,7 @@
 
 这**不等于规则完善或 100 本达标**。目前 `java.t2s` 仅是保留原文的兼容占位，源/书变量仅提供缺省值，直链下载的可选规则错误不会阻塞文本目录，其他 10 个源尚未完成同等级的在线闭环。批量任务只统计拥有完整 TXT 和匹配哈希清单的书，不能用搜索命中数、部分章节缓存或文件名数量充数。
 
-进一步加入 `<js>...</js>` 规则以及 `java.put/get` 的源级变量后，`rezero` 源用关键词 `RE0` 搜索返回 1 本，详情成功，目录解析出 887 章，首章正文 1979 字符；尚未抓完整本，因此不计入整书数。可用 `-PprobeSource=re0zero.top -PprobeQueries=RE0 -PprobeCaptureFirst=true` 复测。
+进一步加入 `<js>...</js>` 规则以及 `java.put/get` 的源级变量后，`rezero` 源用关键词 `RE0` 搜索返回 1 本，详情成功；早期探针记下 887 个普通章节及首章正文 1979 字符。后续版本曾因 DOM 节点传给 JS 时被降成字符串，停在 `ruleToc.isVolume`；当前已按[节点 JS 复测](dom-node-js-probe.md)修复并核对 23 卷+887 章。首章不代表整书，未增加下载计数。
 
 批量过程中发现一条伪成功：`しっぱいしたはなし` 的单章缓存只有 `\nnull`，导出 TXT 虽然存在且哈希匹配，却没有真实正文。因此新增正文 `null`/`undefined` 判空与离线独立审计；这条记录不计入 100 本。当前运行中的旧版探针仍可能打印包含它的完成数，必须以 `auditBookDownloads` 的 `valid` 为准。审计只读本地文件，复核不同书 URL、章节缓存数量与正文、TXT 字节数及 SHA-256：
 
@@ -115,3 +115,5 @@ XPath 跨站规则复测：AOAOSTAR 128 集合的黑岩阅读公开 API 搜索 2
 补充 22 源中的速读谷原域名转向 `.cc`，因此先从现站公开详情 URL 直接起跑。修正前停在 `DETAIL.ruleBookInfo.wordCount` 的 JS 异常；按官方详情可选字段隔离后，JVM/Android 都报该字段告警、详情通过，并访问 4 个 HTTP 200 目录页得到 3292 个去重章节 URL。四页公开 HTML 的章节链接独立去重也为 3292。该次探针以 `SEARCH_SKIPPED_DIRECT_BOOK` 明示跳过搜索；未取正文或整书。[阶段、哈希和复测命令](sudugu-paged-catalog-probe.md)。
 
 随后用这本已知存在的完整书名复测速读谷原始搜索：JVM/Android 均从 `.co` 发 POST，跨主机最终落在 `.cc` 的 200 搜索表单页、0 命中，分别标为响应可疑；JVM 新增逐跳记录确认为 **POST 301 → GET 200**。直接在 `.cc` POST 同样字段会 302 到该书详情。故“指定详情 URL 的目录成功”没有掩盖“原始源搜索入口失效”；Android 尚无逐跳方法记录，不归咎于 CSS 解析器。详见[速读谷记录](sudugu-paged-catalog-probe.md)。
+
+主目录 rezero 的目录规则 `isVolume=@js:result.attr('href').endsWith('index.html')` 发现 DOM 节点被字符串化后会在目录失败。受控节点 JS 视图修复后，同一快照/同词在 JVM、Android 均搜索 1、详情及公开目录 910 条通过，其中 23 卷标题、887 普通章节；站点 HTML 的两类链接独立计数相同。只重验到目录、不抓正文或整书；原始源 JSON 哈希与公开单源相同。[专项证据](dom-node-js-probe.md)。
