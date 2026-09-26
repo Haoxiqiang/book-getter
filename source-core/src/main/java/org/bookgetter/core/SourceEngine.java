@@ -154,6 +154,13 @@ public final class SourceEngine {
                 text = joined.toString();
             }
             if (invalidContent(text)) throw new SourceFailure(Stage.CONTENT, source.id(), "ruleContent.content", "Empty chapter content");
+            String replaceRegex = source.rule("ruleContent", "replaceRegex");
+            if (!source.isJsSource() && replaceRegex != null && !replaceRegex.isBlank()) {
+                String normalized = text.lines().map(String::trim).collect(java.util.stream.Collectors.joining("\n"));
+                text = field(source, "ruleContent", "replaceRegex", normalized, chapter.url(), false);
+                if (invalidContent(text)) throw new SourceFailure(Stage.CONTENT, source.id(),
+                        "ruleContent.replaceRegex", "Replacement removed all chapter content");
+            }
             if (source.kind() == Kind.TEXT) return new ChapterContent(chapter, Kind.TEXT, text, List.of());
             List<Resource> resources = new ArrayList<>();
             if (source.kind() == Kind.IMAGE) {

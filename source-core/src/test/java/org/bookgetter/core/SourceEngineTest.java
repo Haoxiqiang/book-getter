@@ -73,7 +73,8 @@ final class SourceEngineTest {
     @Test void contentPaginationStopsAtKnownNextChapter() {
         Source source = SourceImporter.parse("""
             {"bookSourceUrl":"https://example.test","ruleContent":{
-              "content":"div.content@text","nextContentUrl":"a.next@href"}}
+              "content":"div.content@text","nextContentUrl":"a.next@href",
+              "replaceRegex":"<js>result.replace(/first\\\\nsecond/, 'joined')</js>"}}
             """).sources().get(0);
         java.util.List<String> fetched = new java.util.ArrayList<>();
         SourceEngine engine = new SourceEngine(request -> {
@@ -91,7 +92,7 @@ final class SourceEngineTest {
         SourceFailure missingBoundary = assertThrows(SourceFailure.class,
                 () -> engine.content(source, book, chapter));
         assertEquals("ruleContent.nextContentUrl", missingBoundary.field);
-        assertEquals("first\nsecond", engine.content(source, book, chapter, "https://example.test/two").text());
+        assertEquals("joined", engine.content(source, book, chapter, "https://example.test/two").text());
         assertEquals(List.of("https://example.test/one", "https://example.test/one-2"), fetched);
     }
 
@@ -102,6 +103,34 @@ final class SourceEngineTest {
         List<Chapter> chapters = List.of(first, volume, second);
         assertEquals(second.url(), SourceEngine.nextReadableUrl(chapters, first));
         assertNull(SourceEngine.nextReadableUrl(chapters, second));
+    }
+
+    @Test void contentReplacementRunsJsThenTrailingRegex() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","ruleContent":{
+              "content":"div.content@text",
+              "replaceRegex":"<js>result.replace(/X/g, 'Y')</js>\\n##AD##"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
+                "<div class='content'>X AD</div>", 200, Map.of()));
+        BookHit hit = new BookHit(source.id(), "https://example.test/book", "Book", "", "", "", Kind.TEXT);
+        BookDetail book = new BookDetail(hit, hit.url(), List.of());
+        Chapter chapter = new Chapter(hit.url(), "https://example.test/one", "One", 0, false, false);
+        assertEquals("Y", engine.content(source, book, chapter).text());
+    }
+
+    @Test void replacementJsCanMapPrivateUseFontCharacters() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","ruleContent":{
+              "content":"div.content@text",
+              "replaceRegex":"<js>unescape(escape(result).replace(/%uE800/g,'的'))</js>"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
+                "<div class='content'>A&#xE800;B</div>", 200, Map.of()));
+        BookHit hit = new BookHit(source.id(), "https://example.test/book", "Book", "", "", "", Kind.TEXT);
+        BookDetail book = new BookDetail(hit, hit.url(), List.of());
+        Chapter chapter = new Chapter(hit.url(), "https://example.test/one", "One", 0, false, false);
+        assertEquals("A的B", engine.content(source, book, chapter).text());
     }
 
     @Test void directAttributeRuleReadsCurrentListElement() {

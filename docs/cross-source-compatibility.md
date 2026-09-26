@@ -31,7 +31,7 @@
 | 编码/资源/加密 | `java.base64Encode/base64DecodeToByteArray/cacheFile/createSymmetricCrypto/queryTTF/replaceFont` | 先按实际书源样本和官方接口定契约，不把占位返回算实现 |
 | 辅助 | `java.log/toast/sleep/toURL/timeFormatUTC/t2s/put` | 副作用、时间、繁简转换及 URL 对象要逐项测；`t2s` 目前仍是原文占位 |
 
-书源规则字段还出现 `init`、`isVolume`、`isVip`、`payAction`、`replaceRegex`、`nextContentUrl`、`subContent`、`imageDecode` 等。当前 `SourceEngine` 只执行其中一部分；例如再漫画的 `ruleBookInfo.init` 保存 `bid` 给章节 URL 使用，目录的 `isVolume` 标注卷，这两个机制已补离线测试，但真实源仍被失效详情 URL 阻断。100 本都来自同一个简单文本源，无法覆盖这些分支。
+书源规则字段还出现 `init`、`isVolume`、`isVip`、`payAction`、`replaceRegex`、`nextContentUrl`、`subContent`、`imageDecode` 等。当前 `SourceEngine` 只执行其中一部分；`replaceRegex` 已有合并后执行和私用区字体字符的合成测试、有度首章 JVM/Android 探针，但其全字体映射未获证明。例如再漫画的 `ruleBookInfo.init` 保存 `bid` 给章节 URL 使用，目录的 `isVolume` 标注卷，这两个机制已补离线测试，真实源仍被失效详情 URL 阻断。同一简单文本源的数十本书无法覆盖这些分支。
 
 本轮根据官方 `BookInfo.kt` 与 `BookChapterList.kt` 补齐了详情 `init` 先于其他字段执行、目录 `isVolume/isVip` 判断及无 URL 卷标题的稳定占位 URL；官方 `String?.isTrue` 仅把空、`null`、`false/no/not/0/0.0` 判为假。合成的漫画 JSON 回归验证 `init` 保存 `bid` 后被章节 URL 使用，并验证卷与 VIP 标记。此为**机制单测通过**，不是再漫画真实站点通过；`isPay` 仍未进入当前 `Chapter` 模型。
 

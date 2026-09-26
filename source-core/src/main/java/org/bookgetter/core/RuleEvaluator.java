@@ -88,10 +88,16 @@ public final class RuleEvaluator {
     public String one(String rule, Object input, String baseUrl, Source source, boolean url) {
         if (rule == null || rule.isBlank()) return "";
         String value = rule.trim();
-        if (value.startsWith("<js>") && value.endsWith("</js>")) {
-            Object evaluated = script.evaluate(value.substring(4, value.length() - 5),
+        int scriptEnd = value.startsWith("<js>") ? value.indexOf("</js>") : -1;
+        if (scriptEnd >= 0) {
+            Object evaluated = script.evaluate(value.substring(4, scriptEnd),
                     Map.of("result", scriptInput(input), "baseUrl", baseUrl), source);
             String text = evaluated == null ? "" : evaluated.toString().trim();
+            String trailing = value.substring(scriptEnd + 5).trim();
+            if (!trailing.isEmpty()) {
+                if (!trailing.startsWith("##")) throw new IllegalArgumentException("Unsupported rule after </js>: " + trailing);
+                text = replaceRule(text, trailing.split("##", -1)).trim();
+            }
             return url && !text.isBlank() ? absolute(baseUrl, text) : text;
         }
         int chainedJs = value.indexOf("@js:");
