@@ -77,6 +77,18 @@ public final class RuleEvaluator {
         if (rule == null || rule.isBlank()) return List.of();
         String value = rule.trim();
         if (value.startsWith("@@")) value = value.substring(2);
+        int embeddedScript = value.indexOf("<js>");
+        if (embeddedScript > 0) {
+            int embeddedEnd = value.indexOf("</js>", embeddedScript + 4);
+            if (embeddedEnd >= 0) {
+                List<Object> initial = many(value.substring(0, embeddedScript).trim(), input, baseUrl, source);
+                Object evaluated = script.evaluate(value.substring(embeddedScript + 4, embeddedEnd),
+                        Map.of("result", initial, "baseUrl", baseUrl), source);
+                String trailing = value.substring(embeddedEnd + 5).trim();
+                return trailing.isEmpty() ? normalizeScript(evaluated)
+                        : many(trailing, evaluated == null ? "" : evaluated, baseUrl, source);
+            }
+        }
         int scriptEnd = value.startsWith("<js>") ? value.indexOf("</js>") : -1;
         if (scriptEnd >= 0) {
             Object evaluated = script.evaluate(value.substring(4, scriptEnd),

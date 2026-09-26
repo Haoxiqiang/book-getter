@@ -41,3 +41,5 @@
 [全量聚合源筛选审计](aggregate-source-freshness-probe.md)发现 3907 条记录只有 2595 个有效唯一 ID，不能按聚合页同步日期推断单源新鲜度；同名 `.co/.com` 书源曾被子串过滤一起探测。JVM/Android Debug 探针现支持 `=完整书源ID` 精确筛选；Android 跳转日志区分原请求方法与未观测的最终方法。精确复测的 `.co` 源仍因 POST→GET 的跨域跳转得到搜索表单，不能计为有效零命中或可用源。
 
 [`java.getElement/getElements` 节点专项](dom-host-getelement-probe.md)纠正了把 HTML 节点在脚本入口变成字符串数组的宿主差异；受控节点方法及返回节点进入搜索字段的路径已由合成 Java 与 Android 本地夹具验证。主书源三七轻小说本轮仍停在 HTTP 302，复杂 Cookie/AES 与其他返回模式没有实站正对照，保持部分兼容。
+
+[选择器→JS→选择器专项](selector-js-selector-probe.md)补了列表规则的跨行分段执行及受控 `java.getElements(...).toArray()`；“文学吧”从 CSS 解析错误、再到缺少 `toArray`，最后以“故事”返回 13 条候选。仅验证搜索列表路径，候选相关性和下游阶段未验；其他混合模式仍不能据此宣称兼容。

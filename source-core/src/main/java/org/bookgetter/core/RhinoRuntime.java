@@ -104,7 +104,14 @@ public final class RhinoRuntime implements ScriptRuntime {
                     String rule = args.length == 0 ? "" : Context.toString(args[0]);
                     List<Object> found = hostRules.many(rule, ruleContent[0], ruleBaseUrl, source);
                     Object[] views = found.stream().map(item -> ruleView(context, scope, item, nativeViews)).toArray();
-                    return context.newArray(scope, views);
+                    Scriptable array = context.newArray(scope, views);
+                    ScriptableObject.putProperty(array, "toArray", new BaseFunction() {
+                        @Override public Object call(Context context, Scriptable callScope,
+                                                     Scriptable thisObj, Object[] args) {
+                            return thisObj;
+                        }
+                    });
+                    return array;
                 }
             });
             ScriptableObject.putProperty(java, "getString", new BaseFunction() {
@@ -316,6 +323,12 @@ public final class RhinoRuntime implements ScriptRuntime {
             ScriptableObject.putProperty(scope, name, elementView(cx, scope, element, nativeViews));
             return;
         }
+        if (value instanceof List<?> list && list.stream().allMatch(Element.class::isInstance)) {
+            Elements elements = new Elements();
+            list.forEach(item -> elements.add((Element) item));
+            ScriptableObject.putProperty(scope, name, elementsView(cx, scope, elements, nativeViews));
+            return;
+        }
         Object jsValue = cx.evaluateString(scope, "(" + gson.toJson(value) + ")", "binding:" + name, 1, null);
         if (value instanceof Map<?, ?> && jsValue instanceof ScriptableObject object) {
             object.defineProperty("toString", new BaseFunction() {
@@ -416,6 +429,12 @@ public final class RhinoRuntime implements ScriptRuntime {
             @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
                 Element first = elements.first();
                 return first == null ? null : elementView(context, callScope, first, nativeViews);
+            }
+        });
+        ScriptableObject.putProperty(view, "toArray", new BaseFunction() {
+            @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
+                return context.newArray(callScope, elements.stream()
+                        .map(element -> elementView(context, callScope, element, nativeViews)).toArray());
             }
         });
         ScriptableObject.putProperty(view, "attr", new BaseFunction() {

@@ -7,6 +7,19 @@ import org.bookgetter.core.Models.*;
 import org.junit.jupiter.api.Test;
 
 final class SourceEngineTest {
+    @Test void searchListSupportsSelectorJsSelectorChain() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","searchUrl":"/search?q={{key}}",
+             "ruleSearch":{"bookList":"li.book\n<js>result.toArray()</js>\na",
+               "name":"@text","bookUrl":"@href"}}
+            """).sources().get(0);
+        Transport transport = request -> new FetchResponse(request.url(),
+                "<ul><li class='book'><a href='/one'>One</a></li>"
+                + "<li class='book'><a href='/two'>Two</a></li></ul>", 200, Map.of());
+        List<BookHit> hits = new SourceEngine(transport).search(source, "query", 1);
+        assertEquals(List.of("One", "Two"), hits.stream().map(BookHit::name).toList());
+    }
+
     private final String sourceJson = """
         {"bookSourceUrl":"https://example.test", "bookSourceName":"fixture",
          "searchUrl":"/search?q={{key}}&page={{page}}",
@@ -665,6 +678,8 @@ final class SourceEngineTest {
         assertEquals("<a href=\"/one\">One</a>", runtime.evaluate("java.getElement('li.book.0').html()",
                 Map.of("result", html, "baseUrl", source.id()), source));
         assertEquals("One|Two", runtime.evaluate("java.getElements('li.book').map(x => x.text()).join('|')",
+                Map.of("result", html, "baseUrl", source.id()), source));
+        assertEquals("One|Two", runtime.evaluate("java.getElements('li.book').toArray().map(x => x.text()).join('|')",
                 Map.of("result", html, "baseUrl", source.id()), source));
         Object returned = runtime.evaluate("java.getElements('li.book')",
                 Map.of("result", html, "baseUrl", source.id()), source);
