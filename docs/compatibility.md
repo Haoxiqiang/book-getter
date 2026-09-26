@@ -8,7 +8,8 @@
 | 本地文件、剪贴板、URL 导入 | 已实现 | URL 由用户主动输入；无自动订阅更新 |
 | 单源及多源搜索 | 已实现 | 每源第 1 页；核心接口接受页码，UI 暂无翻页按钮；正常无匹配返回空结果，已识别的 HTTP 200 业务错误作为源错误而非空结果。调试探针对跨主机跳转、非 200 的 2xx 和搜索端点落根路径标响应可疑，仅供排查，不把所有 0 条认作规则通过 |
 | 详情、目录、正文 | 已实现基础链路 | `ruleBookInfo.init` 的 JSON 对象与 JS 字符串基础路径已测试；目录与正文下一页最多 50 页；传入目录中已知的下一章 URL 后，正文分页在其边界停止；拒绝已识别的升级占位正文；不执行预更新脚本和付费动作 |
-| CSS、XPath、JSONPath、正则 | 基础子集 | 支持单段选取与 `@text/@html/@href` 等单动作；列表元素上可直接用 `text`、`href`、`src`；`tag.a.0`、`tag.span.-1`、`tag.tr!0` 基础 DOM 索引已由真实源及合成测试验证，`[]` 区间仍未实现；顶层 `&&/||/%%` 有合成回归且避开 JSONPath 过滤器内部运算符，但尚未证明所有混合模式和复杂后置替换等价；普通替换正则默认不跨行 |
+| CSS、XPath、JSONPath、正则 | 基础子集 | 支持单段选取与 `@text/@html/@href` 等单动作；列表元素上可直接用 `text`、`href`、`src`；`tag.a.0`、`tag.span.-1`、`tag.tr!0` 基础 DOM 索引已由真实源及合成测试验证；`tag.span[0:1]` 等方括号位置索引有真实规则样本和 Java 回归，相关站点当前网络不可达，不能声称实站通过。顶层 `&&/||/%%` 有合成回归且避开 JSONPath 过滤器内部运算符，但尚未证明所有混合模式和复杂后置替换等价；普通替换正则默认不跨行 |
+| 书籍元数据 | 基础字段已实现 | 搜索/详情的题材 `kind`、字数、最新章节映射至 `BookHit.genre/wordCount/lastChapter`，与媒体类型 `BookHit.kind` 区分；飞卢搜索及抖音详情已在线验证非空，UI 尚未展示全部字段 |
 | 规则内 JS、`mainJs` | 基础子集 | Rhino 执行，支持部分 ES6、`jsLib`、`<js>` 和受控的 `java.ajax/get/put/timeFormatUTC`；`java.t2s` 仍是原文返回占位。`mainJs` 支持 search/getBookInfo/getChapters/getContent，`getBookInfo` 可省略；详情字段会合并到搜索结果。`@put/@get` 仅实现详情以后书籍作用域的基础链，宿主对象和完整变量生命周期尚不等价于 Legado |
 | 手动登录、Cookie、WebView | 已实现基础链路 | HTTP 跳转链共享 Android Cookie；URL 选项 `webView` 按官方“非空且非 false”语义判断，思路客②非标准引号规则已在 JVM/Android 分别核对请求路径；WebView 请求仅 GET，登录验证、WebJs、验证码处理未实现。该站首章重定向到无关域名，正文未通过 |
 | TXT/EPUB 导出 | 已实现 | 仅文本章节；EPUB 是最小 EPUB 2，暂不含封面、插图或复杂排版 |

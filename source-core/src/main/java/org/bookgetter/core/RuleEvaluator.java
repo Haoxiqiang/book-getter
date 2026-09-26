@@ -5,8 +5,10 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -23,6 +25,7 @@ import org.w3c.dom.NodeList;
 public final class RuleEvaluator {
     private static final Pattern PUT = Pattern.compile("(?i)@put:(\\{[^}]+\\})");
     private static final Pattern GET = Pattern.compile("(?i)@get:\\{([^}]+)\\}");
+    private static final Pattern BRACKET_INDEX = Pattern.compile("^(.*?)(!)?\\[([\\d\\s,:-]+)\\]$");
     private final ScriptRuntime script;
     private final Map<String, Map<String, String>> variables = new ConcurrentHashMap<>();
     private final ThreadLocal<String> scope = new ThreadLocal<>();
@@ -366,15 +369,18 @@ public final class RuleEvaluator {
 
     private static List<Object> select(Object input, String selector, String baseUrl) {
         Element element = input instanceof Element e ? e : Jsoup.parse(input.toString(), baseUrl);
+        Matcher bracket = BRACKET_INDEX.matcher(selector);
         Matcher index = Pattern.compile("^(.*?)([.!])(-?\\d+)$").matcher(selector);
-        String baseSelector = index.matches() ? index.group(1) : selector;
+        String baseSelector = bracket.matches() ? bracket.group(1) : index.matches() ? index.group(1) : selector;
         List<Object> found;
-        if (baseSelector.startsWith("class.") && baseSelector.substring(6).contains(" "))
+        if (baseSelector.isBlank() && bracket.matches()) found = new ArrayList<>(element.children());
+        else if (baseSelector.startsWith("class.") && baseSelector.substring(6).contains(" "))
             found = new ArrayList<>(element.getElementsByClass(baseSelector.substring(6)));
         else {
             String normalized = normalizeSelector(baseSelector);
             found = normalized.isBlank() ? List.of() : new ArrayList<>(element.select(normalized));
         }
+        if (bracket.matches()) return indexedElements(found, bracket.group(3), bracket.group(2) != null);
         if (!index.matches()) return found;
         int position = Integer.parseInt(index.group(3));
         if (position < 0) position += found.size();
@@ -383,6 +389,42 @@ public final class RuleEvaluator {
         List<Object> remaining = new ArrayList<>(found);
         remaining.remove(position);
         return remaining;
+    }
+
+    private static List<Object> indexedElements(List<Object> elements, String spec, boolean exclude) {
+        int size = elements.size();
+        if (size == 0) return List.of();
+        Set<Integer> selected = new LinkedHashSet<>();
+        for (String part : spec.split(",", -1)) {
+            String[] range = part.trim().split(":", -1);
+            if (range.length == 1) {
+                if (range[0].isBlank()) continue;
+                int position = normalizeIndex(Integer.parseInt(range[0].trim()), size);
+                if (position >= 0 && position < size) selected.add(position);
+            } else if (range.length == 2 || range.length == 3) {
+                int start = range[0].isBlank() ? 0 : normalizeIndex(Integer.parseInt(range[0].trim()), size);
+                int end = range[1].isBlank() ? size - 1 : normalizeIndex(Integer.parseInt(range[1].trim()), size);
+                if ((start < 0 && end < 0) || (start >= size && end >= size)) continue;
+                start = Math.max(0, Math.min(size - 1, start));
+                end = Math.max(0, Math.min(size - 1, end));
+                int step = range.length == 3 && !range[2].isBlank() ? Integer.parseInt(range[2].trim()) : 1;
+                if (step <= 0) step = -step < size ? step + size : 1;
+                if (step >= size) { selected.add(start); continue; }
+                if (start <= end) for (int position = start; position <= end; position += step) selected.add(position);
+                else for (int position = start; position >= end; position -= step) selected.add(position);
+            }
+        }
+        List<Object> result = new ArrayList<>();
+        if (exclude) {
+            for (int i = 0; i < size; i++) if (!selected.contains(i)) result.add(elements.get(i));
+        } else {
+            for (int position : selected) result.add(elements.get(position));
+        }
+        return result;
+    }
+
+    private static int normalizeIndex(int position, int size) {
+        return position < 0 ? position + size : position;
     }
 
     public static String absolute(String base, String path) {

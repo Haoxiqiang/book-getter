@@ -54,6 +54,45 @@ final class SourceEngineTest {
                 "http://www.isiluke.la/html/92696/").webView());
     }
 
+    @Test void legacyBracketIndexesFollowInclusiveLegadoRanges() {
+        Source source = SourceImporter.parse(sourceJson).sources().get(0);
+        RuleEvaluator rules = new RuleEvaluator(new RhinoRuntime(request ->
+                new FetchResponse(request.url(), "", 200, Map.of())));
+        String html = "<p><span>A</span><span>B</span><span>C</span><span>D</span></p>";
+        String base = "https://example.test/";
+        assertEquals("A\nB", rules.one("tag.p@tag.span[0:1]@text", html, base, source, false));
+        assertEquals("D\nC\nB\nA", rules.one("tag.p@tag.span[-1:0]@text", html, base, source, false));
+        assertEquals("A\nC", rules.one("tag.p@tag.span[0,2]@text", html, base, source, false));
+        assertEquals("A\nC\nD", rules.one("tag.p@tag.span![1]@text", html, base, source, false));
+        assertEquals("B\nD", rules.one("tag.p@tag.span[1:3:2]@text", html, base, source, false));
+    }
+
+    @Test void searchAndDetailPreserveBookMetadataWithoutConfusingMediaKind() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","bookSourceName":"metadata",
+             "searchUrl":"/search?q={{key}}",
+             "ruleSearch":{"bookList":"class.item","name":"tag.h3@text","bookUrl":"tag.a@href",
+               "kind":"tag.p.0@tag.span[0:1]@text","wordCount":"class.words@text",
+               "lastChapter":"class.latest@text"},
+             "ruleBookInfo":{"kind":"class.genre@text","wordCount":"class.words@text"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
+                request.url().contains("/search")
+                        ? "<div class='item'><h3>Book</h3><a href='/book'>Read</a>"
+                        + "<p><span>玄幻</span><span>完结</span><span>Extra</span></p>"
+                        + "<b class='words'>100万字</b><b class='latest'>第九章</b></div>"
+                        : "<div class='genre'>奇幻</div>", 200, Map.of()));
+        BookHit hit = engine.search(source, "Book", 1).get(0);
+        assertEquals(Kind.TEXT, hit.kind());
+        assertEquals("玄幻\n完结", hit.genre());
+        assertEquals("100万字", hit.wordCount());
+        assertEquals("第九章", hit.lastChapter());
+        BookHit detailed = engine.detail(source, hit).hit();
+        assertEquals("奇幻", detailed.genre());
+        assertEquals("100万字", detailed.wordCount());
+        assertEquals("第九章", detailed.lastChapter());
+    }
+
     @Test void importSearchDetailCatalogContent() {
         Source source = SourceImporter.parse(sourceJson).sources().get(0);
         Transport transport = request -> {

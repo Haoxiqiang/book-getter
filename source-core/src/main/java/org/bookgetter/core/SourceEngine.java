@@ -45,7 +45,10 @@ public final class SourceEngine {
                 hits.add(new BookHit(source.id(), url, name,
                         field(source, "ruleSearch", "author", item, response.url(), false),
                         field(source, "ruleSearch", "intro", item, response.url(), false),
-                        field(source, "ruleSearch", "coverUrl", item, response.url(), true), source.kind()));
+                        field(source, "ruleSearch", "coverUrl", item, response.url(), true), source.kind(),
+                        field(source, "ruleSearch", "kind", item, response.url(), false),
+                        field(source, "ruleSearch", "wordCount", item, response.url(), false),
+                        field(source, "ruleSearch", "lastChapter", item, response.url(), false)));
             }
             return hits;
         } catch (SourceFailure e) { throw e; }
@@ -71,6 +74,9 @@ public final class SourceEngine {
             String author = field(source, "ruleBookInfo", "author", detailContent, response.url(), false);
             String intro = field(source, "ruleBookInfo", "intro", detailContent, response.url(), false);
             String cover = field(source, "ruleBookInfo", "coverUrl", detailContent, response.url(), true);
+            String genre = field(source, "ruleBookInfo", "kind", detailContent, response.url(), false);
+            String wordCount = field(source, "ruleBookInfo", "wordCount", detailContent, response.url(), false);
+            String lastChapter = field(source, "ruleBookInfo", "lastChapter", detailContent, response.url(), false);
             String toc = field(source, "ruleBookInfo", "tocUrl", detailContent, response.url(), true);
             if (toc.isBlank()) toc = response.url();
             // An optional direct-download rule may only apply to one subtype of a mixed source.
@@ -82,7 +88,10 @@ public final class SourceEngine {
             }
             BookHit enriched = new BookHit(hit.sourceId(), hit.url(), name.isBlank() ? hit.name() : name,
                     author.isBlank() ? hit.author() : author, intro.isBlank() ? hit.intro() : intro,
-                    cover.isBlank() ? hit.coverUrl() : cover, hit.kind());
+                    cover.isBlank() ? hit.coverUrl() : cover, hit.kind(),
+                    genre.isBlank() ? hit.genre() : genre,
+                    wordCount.isBlank() ? hit.wordCount() : wordCount,
+                    lastChapter.isBlank() ? hit.lastChapter() : lastChapter);
             return new BookDetail(enriched, toc, download.isBlank() ? List.of() : List.of(download.split("\\s+")));
         } catch (SourceFailure e) { throw e; }
         catch (Exception e) { throw new SourceFailure(Stage.DETAIL, source.id(), "ruleBookInfo", e.getMessage(), e); }
@@ -213,7 +222,8 @@ public final class SourceEngine {
             if (url.isBlank() || name.isBlank()) continue;
             result.add(new BookHit(source.id(), RuleEvaluator.absolute(source.id(), url), name,
                     string(object, "author"), string(object, "intro"),
-                    absoluteIfPresent(source.id(), string(object, "coverUrl")), source.kind()));
+                    absoluteIfPresent(source.id(), string(object, "coverUrl")), source.kind(),
+                    string(object, "kind", "genre"), string(object, "wordCount"), string(object, "lastChapter")));
         }
         return result;
     }
@@ -225,7 +235,10 @@ public final class SourceEngine {
         String toc = absoluteIfPresent(hit.url(), string(object, "tocUrl"));
         BookHit enriched = new BookHit(hit.sourceId(), hit.url(), orDefault(string(object, "name"), hit.name()),
                 orDefault(string(object, "author"), hit.author()), orDefault(string(object, "intro"), hit.intro()),
-                orDefault(absoluteIfPresent(hit.url(), string(object, "coverUrl")), hit.coverUrl()), hit.kind());
+                orDefault(absoluteIfPresent(hit.url(), string(object, "coverUrl")), hit.coverUrl()), hit.kind(),
+                orDefault(string(object, "kind", "genre"), hit.genre()),
+                orDefault(string(object, "wordCount"), hit.wordCount()),
+                orDefault(string(object, "lastChapter"), hit.lastChapter()));
         return new BookDetail(enriched, toc.isBlank() ? hit.url() : toc,
                 jsonStrings(object, "downloadUrls").stream().map(url -> RuleEvaluator.absolute(hit.url(), url)).toList());
     }

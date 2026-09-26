@@ -36,7 +36,12 @@ public final class Models {
         public boolean isJsSource() { return string("mainJs") != null && !string("mainJs").isBlank(); }
     }
     public record ImportResult(List<Source> sources, List<String> sourceUrls, List<Diagnostic> diagnostics) {}
-    public record BookHit(String sourceId, String url, String name, String author, String intro, String coverUrl, Kind kind) {}
+    public record BookHit(String sourceId, String url, String name, String author, String intro, String coverUrl,
+                          Kind kind, String genre, String wordCount, String lastChapter) {
+        public BookHit(String sourceId, String url, String name, String author, String intro, String coverUrl, Kind kind) {
+            this(sourceId, url, name, author, intro, coverUrl, kind, "", "", "");
+        }
+    }
     public record BookDetail(BookHit hit, String tocUrl, List<String> downloadUrls) {}
     public record Chapter(String bookUrl, String url, String title, int index, boolean volume, boolean vip) {}
     public record Resource(String url, String title, String mimeHint) {}

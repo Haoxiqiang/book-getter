@@ -122,7 +122,7 @@ public final class LiveSourceProbe {
                             .anyMatch(ResponseSignals::suspectEmptySearch);
                     String status = hits.isEmpty() ? (suspectSearch ? "RESPONSE_SUSPECT" : "ZERO_UNVERIFIED") : "OK";
                     System.out.println(row(source.name(), keyword, status,
-                            Integer.toString(hits.size()), first, ""));
+                            Integer.toString(hits.size()), first, hits.isEmpty() ? "" : metadataFlags(hits.get(0))));
                     if (captureFirst && !hits.isEmpty()) {
                         try {
                             int detailQualityStart = responseQualities.size();
@@ -131,7 +131,7 @@ public final class LiveSourceProbe {
                                     .anyMatch(value -> value.equals("BUSINESS_ERROR") || value.equals("CHALLENGE_PAGE")
                                             || value.equals("PARKED_DOMAIN") || value.equals("APP_UPGRADE_REQUIRED"));
                             System.out.println(row(source.name(), keyword, suspect ? "DETAIL_SUSPECT" : "DETAIL_OK",
-                                    "", detail.hit().name(), detail.tocUrl()));
+                                    "", detail.hit().name(), detail.tocUrl() + " " + metadataFlags(detail.hit())));
                             List<Chapter> chapters = engine.chapters(source, detail);
                             System.out.println(row(source.name(), keyword, "CATALOG_OK", Integer.toString(chapters.size()), "",
                                     chapters.isEmpty() ? "" : "firstUrl=" + chapters.get(0).url()));
@@ -186,6 +186,11 @@ public final class LiveSourceProbe {
                 return true;
         }
         return false;
+    }
+
+    private static String metadataFlags(BookHit hit) {
+        return "genre=" + !hit.genre().isBlank() + " words=" + !hit.wordCount().isBlank()
+                + " last=" + !hit.lastChapter().isBlank();
     }
 
     static FetchResponse fetch(HttpClient client, FetchRequest request) throws Exception {
