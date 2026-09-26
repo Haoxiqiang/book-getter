@@ -68,8 +68,12 @@ public final class RequestPlanner {
         }
         if (options != null && options.has("headers")) options.getAsJsonObject("headers").entrySet().forEach(e -> headers.put(e.getKey(), e.getValue().getAsString()));
         String method = option(options, "method", "GET").toUpperCase();
-        String body = option(options, "body", null);
+        String body = bodyOption(options);
         String charsetName = option(options, "charset", null);
+        if (method.equals("POST") && body != null && !body.isBlank()
+                && headers.keySet().stream().noneMatch(name -> name.equalsIgnoreCase("Content-Type"))
+                && (body.stripLeading().startsWith("{") || body.stripLeading().startsWith("[")))
+            headers.put("Content-Type", "application/json; charset=UTF-8");
         if (method.equals("POST") && body != null && !body.isBlank()
                 && headers.keySet().stream().noneMatch(name -> name.equalsIgnoreCase("Content-Type"))
                 && !body.stripLeading().startsWith("{") && !body.stripLeading().startsWith("[")
@@ -105,5 +109,11 @@ public final class RequestPlanner {
 
     private static String option(JsonObject object, String key, String fallback) {
         return object == null || !object.has(key) || object.get(key).isJsonNull() ? fallback : object.get(key).getAsString();
+    }
+
+    private static String bodyOption(JsonObject options) {
+        if (options == null || !options.has("body") || options.get("body").isJsonNull()) return null;
+        var body = options.get("body");
+        return body.isJsonPrimitive() ? body.getAsString() : body.toString();
     }
 }

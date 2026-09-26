@@ -1,11 +1,13 @@
 package org.bookgetter.core;
 
 import com.jayway.jsonpath.JsonPath;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.xml.xpath.XPathConstants;
@@ -19,8 +21,20 @@ import org.w3c.dom.NodeList;
 
 /** Supported subset: CSS, XPath, JSONPath, regex and JS, with a single extraction action. */
 public final class RuleEvaluator {
+    private static final Pattern PUT = Pattern.compile("(?i)@put:(\\{[^}]+\\})");
+    private static final Pattern GET = Pattern.compile("(?i)@get:\\{([^}]+)\\}");
     private final ScriptRuntime script;
+    private final Map<String, Map<String, String>> variables = new ConcurrentHashMap<>();
+    private final ThreadLocal<String> scope = new ThreadLocal<>();
     public RuleEvaluator(ScriptRuntime script) { this.script = script; }
+
+    public void enterBook(String bookUrl) { scope.set(bookUrl); }
+    public void leaveBook() { scope.remove(); }
+
+    private Map<String, String> variables(Source source) {
+        return variables.computeIfAbsent(scope.get() == null ? source.id() : scope.get(),
+                ignored -> new ConcurrentHashMap<>());
+    }
 
     public List<Object> many(String rule, Object input, String baseUrl, Source source) {
         if (rule == null || rule.isBlank()) return List.of();
@@ -88,6 +102,20 @@ public final class RuleEvaluator {
     public String one(String rule, Object input, String baseUrl, Source source, boolean url) {
         if (rule == null || rule.isBlank()) return "";
         String value = rule.trim();
+        if (!value.startsWith("@js:") && !value.startsWith("<js>")) {
+            value = expandGets(value, source);
+            Matcher put = PUT.matcher(value);
+            if (put.find()) {
+                String assignmentsRule = put.group(1);
+                String baseRule = put.replaceAll("").trim();
+                JsonObject assignments = JsonParser.parseString(assignmentsRule).getAsJsonObject();
+                String result = one(baseRule, input, baseUrl, source, url);
+                for (Map.Entry<String, com.google.gson.JsonElement> assignment : assignments.entrySet())
+                    variables(source).put(assignment.getKey(), one(assignment.getValue().getAsString(),
+                            input, baseUrl, source, false));
+                return result;
+            }
+        }
         int scriptEnd = value.startsWith("<js>") ? value.indexOf("</js>") : -1;
         if (scriptEnd >= 0) {
             Object evaluated = script.evaluate(value.substring(4, scriptEnd),
@@ -182,6 +210,15 @@ public final class RuleEvaluator {
                     .matcher(matcher.group()).replaceFirst(replacement) : "";
         }
         return matcher.replaceAll(replacement);
+    }
+
+    private String expandGets(String rule, Source source) {
+        Matcher matcher = GET.matcher(rule);
+        StringBuffer expanded = new StringBuffer();
+        while (matcher.find()) matcher.appendReplacement(expanded,
+                Matcher.quoteReplacement(variables(source).getOrDefault(matcher.group(1), "")));
+        matcher.appendTail(expanded);
+        return expanded.toString();
     }
 
     private record Combination(String operator, List<String> parts, String suffix) {}

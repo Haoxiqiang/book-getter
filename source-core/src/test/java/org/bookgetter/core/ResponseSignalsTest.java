@@ -13,6 +13,12 @@ final class ResponseSignalsTest {
         assertEquals("EMPTY_RESPONSE", quality(200, ""));
         assertEquals("PARKED_DOMAIN", quality(200, "<p>This domain may be for sale.</p>"));
         assertEquals("CHALLENGE_PAGE", quality(200, "<title>Just a moment...</title>"));
+        assertEquals("APP_UPGRADE_REQUIRED", quality(200, "{\"code\":0,\"chapter\":{\"body\":\"当前版本过低，请升级到最新版\"}}"));
+        StringBuilder escapedNotice = new StringBuilder();
+        for (char character : "当前版本过低，请升级到最新版".toCharArray())
+            escapedNotice.append(String.format("\\u%04x", (int) character));
+        assertEquals("APP_UPGRADE_REQUIRED", quality(200,
+                "{\"code\":0,\"chapter\":{\"body\":\"" + escapedNotice + "\"}}"));
         assertEquals("BUSINESS_ERROR", quality(200, "{\"errno\":2,\"errmsg\":\"漫画不存在\",\"data\":{}}"));
         assertEquals("BUSINESS_ERROR", quality(200, "{\"code\":100103,\"message\":\"PARAM_INVALID\",\"data\":null}"));
         assertEquals("UNCLASSIFIED", quality(200, "{\"errno\":0,\"data\":[]}"));

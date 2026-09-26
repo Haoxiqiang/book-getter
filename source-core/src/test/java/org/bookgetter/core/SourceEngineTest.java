@@ -68,6 +68,22 @@ final class SourceEngineTest {
         assertEquals(Stage.CONTENT, assertThrows(SourceFailure.class,
                 () -> engine.content(source, book, chapter)).stage);
         assertTrue(SourceEngine.invalidContent("\nnull "));
+        assertTrue(SourceEngine.invalidContent("当前版本过低，已停止使用，请升级到最新版继续阅读。"));
+    }
+
+    @Test void appUpgradeNoticeIsNotAChapter() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://api.example.test","ruleContent":{"content":"$..body"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
+                "{\"code\":0,\"chapter\":{\"body\":\"当前版本过低，请升级到最新版继续阅读。\"}}",
+                200, Map.of()));
+        BookHit hit = new BookHit(source.id(), "https://api.example.test/book", "Book", "", "", "", Kind.TEXT);
+        BookDetail book = new BookDetail(hit, hit.url(), List.of());
+        Chapter chapter = new Chapter(hit.url(), "https://api.example.test/one", "One", 0, false, false);
+        SourceFailure failure = assertThrows(SourceFailure.class, () -> engine.content(source, book, chapter));
+        assertEquals(Stage.CONTENT, failure.stage);
+        assertEquals("ruleContent.content", failure.field);
     }
 
     @Test void contentPaginationStopsAtKnownNextChapter() {
@@ -286,6 +302,21 @@ final class SourceEngineTest {
         assertTrue(request.headers().get("Content-Type").startsWith("application/x-www-form-urlencoded"));
     }
 
+    @Test void postObjectBodyIsSerializedAsJsonLikeLegadoUrlOption() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://novel.example","searchUrl":"/search,{\\"method\\":\\"POST\\",\\"body\\":{\\"keyword\\":{{key}},\\"page_index\\":{{page}}}}"}
+            """).sources().get(0);
+        FetchRequest request = new RequestPlanner(new RhinoRuntime(unused ->
+                new FetchResponse(unused.url(), "", 200, Map.of())))
+                .plan(source.string("searchUrl"), source, "斗破苍穹", 2, source.id());
+        assertEquals("POST", request.method());
+        assertEquals("斗破苍穹", com.google.gson.JsonParser.parseString(request.body())
+                .getAsJsonObject().get("keyword").getAsString());
+        assertEquals(2, com.google.gson.JsonParser.parseString(request.body())
+                .getAsJsonObject().get("page_index").getAsInt());
+        assertTrue(request.headers().get("Content-Type").startsWith("application/json"));
+    }
+
     @Test void requestPlanningFailureIsAttributedToSearchUrl() {
         Source source = SourceImporter.parse("""
             {"bookSourceUrl":"https://example.test","searchUrl":"@js:missingHostMethod()"}
@@ -405,6 +436,29 @@ final class SourceEngineTest {
                 200, Map.of()));
         assertEquals("First", engine.search(source, "first", 1).get(0).name());
         assertEquals("Second", engine.search(source, "second", 1).get(0).name());
+    }
+
+    @Test void detailPutVariableFeedsCatalogGetWithoutCrossBookLeakage() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://api.example.test",
+             "ruleBookInfo":{"name":"$..bookName@put:{bid:$..x_id}","tocUrl":"/catalog/{{$.._id}}"},
+             "ruleToc":{"chapterList":"$..chapters[*]","chapterName":"$.t",
+               "chapterUrl":"https://content.example.test/@get:{bid}/{{$.l}}"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> {
+            String body = request.url().contains("/info/a")
+                    ? "{\"bookName\":\"First\",\"x_id\":\"A42\",\"_id\":\"a\"}"
+                    : request.url().contains("/info/b")
+                    ? "{\"bookName\":\"Second\",\"x_id\":\"B43\",\"_id\":\"b\"}"
+                    : "{\"chapters\":[{\"t\":\"One\",\"l\":1}]}";
+            return new FetchResponse(request.url(), body, 200, Map.of());
+        });
+        BookHit first = new BookHit(source.id(), "https://api.example.test/info/a", "First", "", "", "", Kind.TEXT);
+        BookHit second = new BookHit(source.id(), "https://api.example.test/info/b", "Second", "", "", "", Kind.TEXT);
+        BookDetail firstDetail = engine.detail(source, first);
+        BookDetail secondDetail = engine.detail(source, second);
+        assertEquals("https://content.example.test/A42/1", engine.chapters(source, firstDetail).get(0).url());
+        assertEquals("https://content.example.test/B43/1", engine.chapters(source, secondDetail).get(0).url());
     }
 
     @Test void combinedRulesDoNotSplitJsonPathFilterOperators() {

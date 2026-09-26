@@ -52,6 +52,7 @@ public final class SourceEngine {
 
     public BookDetail detail(Source source, BookHit hit) {
         requireIdentity(source, hit.sourceId());
+        rules.enterBook(hit.url());
         try {
             if (source.isJsSource()) return jsDetail(source, hit);
             FetchResponse response = fetch(requests.plan(hit.url(), source, "", 1, source.id()));
@@ -78,11 +79,13 @@ public final class SourceEngine {
             return new BookDetail(enriched, toc, download.isBlank() ? List.of() : List.of(download.split("\\s+")));
         } catch (SourceFailure e) { throw e; }
         catch (Exception e) { throw new SourceFailure(Stage.DETAIL, source.id(), "ruleBookInfo", e.getMessage(), e); }
+        finally { rules.leaveBook(); }
     }
 
     public List<Chapter> chapters(Source source, BookDetail book) {
         requireIdentity(source, book.hit().sourceId());
         if (source.kind() == Kind.FILE) return List.of();
+        rules.enterBook(book.hit().url());
         try {
             if (source.isJsSource()) return jsChapters(source, book);
             List<Chapter> chapters = new ArrayList<>();
@@ -107,6 +110,7 @@ public final class SourceEngine {
             return chapters;
         } catch (SourceFailure e) { throw e; }
         catch (Exception e) { throw new SourceFailure(Stage.CATALOG, source.id(), "ruleToc", e.getMessage(), e); }
+        finally { rules.leaveBook(); }
     }
 
     public ChapterContent content(Source source, BookDetail book, Chapter chapter) {
@@ -129,6 +133,7 @@ public final class SourceEngine {
     /** Pass the catalog's following chapter URL so pagination cannot absorb that chapter. */
     public ChapterContent content(Source source, BookDetail book, Chapter chapter, String nextChapterUrl) {
         requireIdentity(source, book.hit().sourceId());
+        rules.enterBook(book.hit().url());
         try {
             String text;
             if (source.isJsSource()) {
@@ -144,6 +149,9 @@ public final class SourceEngine {
                 Set<String> visited = new HashSet<>();
                 while (page != null && !page.isBlank() && visited.add(page) && visited.size() <= 50) {
                     FetchResponse response = fetch(requests.plan(page, source, "", 1, book.tocUrl()));
+                    if (ResponseSignals.quality(response).equals("APP_UPGRADE_REQUIRED"))
+                        throw new SourceFailure(Stage.CONTENT, source.id(), "ruleContent.content",
+                                "Source requires an app upgrade; response is not chapter text");
                     String value = field(source, "ruleContent", "content", response.body(), response.url(), false);
                     if (invalidContent(value)) throw new SourceFailure(Stage.CONTENT, source.id(), "ruleContent.content", "Empty page content");
                     if (joined.length() > 0) joined.append('\n');
@@ -169,6 +177,7 @@ public final class SourceEngine {
             return new ChapterContent(chapter, source.kind(), null, resources);
         } catch (SourceFailure e) { throw e; }
         catch (Exception e) { throw new SourceFailure(Stage.CONTENT, source.id(), "ruleContent", e.getMessage(), e); }
+        finally { rules.leaveBook(); }
     }
 
     private List<BookHit> jsSearch(Source source, String keyword, int page) {
@@ -225,7 +234,8 @@ public final class SourceEngine {
     static boolean invalidContent(String text) {
         if (text == null) return true;
         String value = text.trim();
-        return value.isEmpty() || value.equalsIgnoreCase("null") || value.equalsIgnoreCase("undefined");
+        return value.isEmpty() || value.equalsIgnoreCase("null") || value.equalsIgnoreCase("undefined")
+                || (value.startsWith("当前版本过低") && value.contains("请升级到最新版"));
     }
     private static String absoluteIfPresent(String base, String value) {
         return value.isBlank() ? "" : RuleEvaluator.absolute(base, value);

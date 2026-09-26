@@ -106,7 +106,8 @@ public final class LiveSourceProbe {
                     String first = hits.isEmpty() ? "" : hits.get(0).name();
                     boolean suspectSearch = responseQualities.subList(qualityStart, responseQualities.size()).stream()
                             .anyMatch(value -> value.equals("BUSINESS_ERROR") || value.equals("CHALLENGE_PAGE")
-                                    || value.equals("PARKED_DOMAIN") || value.equals("UNRESOLVED_REDIRECT"));
+                                    || value.equals("PARKED_DOMAIN") || value.equals("APP_UPGRADE_REQUIRED")
+                                    || value.equals("UNRESOLVED_REDIRECT"));
                     String status = hits.isEmpty() ? (suspectSearch ? "RESPONSE_SUSPECT" : "ZERO_UNVERIFIED") : "OK";
                     System.out.println(row(source.name(), keyword, status,
                             Integer.toString(hits.size()), first, ""));
@@ -116,16 +117,20 @@ public final class LiveSourceProbe {
                             BookDetail detail = engine.detail(source, hits.get(0));
                             boolean suspect = responseQualities.subList(detailQualityStart, responseQualities.size()).stream()
                                     .anyMatch(value -> value.equals("BUSINESS_ERROR") || value.equals("CHALLENGE_PAGE")
-                                            || value.equals("PARKED_DOMAIN"));
+                                            || value.equals("PARKED_DOMAIN") || value.equals("APP_UPGRADE_REQUIRED"));
                             System.out.println(row(source.name(), keyword, suspect ? "DETAIL_SUSPECT" : "DETAIL_OK",
                                     "", detail.hit().name(), detail.tocUrl()));
                             List<Chapter> chapters = engine.chapters(source, detail);
                             System.out.println(row(source.name(), keyword, "CATALOG_OK", Integer.toString(chapters.size()), "", ""));
                             if (!chapters.isEmpty() && exportFirst == null) {
                                 Chapter firstChapter = chapters.stream().filter(chapter -> !chapter.volume()).findFirst().orElseThrow();
+                                int contentQualityStart = responseQualities.size();
                                 var content = engine.content(source, detail, firstChapter,
                                         SourceEngine.nextReadableUrl(chapters, firstChapter));
-                                System.out.println(row(source.name(), keyword, "CONTENT_OK", "", "",
+                                boolean suspectContent = responseQualities.subList(contentQualityStart, responseQualities.size()).stream()
+                                        .anyMatch(value -> value.equals("BUSINESS_ERROR") || value.equals("APP_UPGRADE_REQUIRED")
+                                                || value.equals("CHALLENGE_PAGE") || value.equals("PARKED_DOMAIN"));
+                                System.out.println(row(source.name(), keyword, suspectContent ? "CONTENT_SUSPECT" : "CONTENT_OK", "", "",
                                         "characters=" + (content.text() == null ? 0 : content.text().length())));
                             }
                             if (exportFirst != null) {

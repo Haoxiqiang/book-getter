@@ -66,7 +66,8 @@ public final class CompatibilityProbeActivity extends Activity {
                 List<BookHit> hits = engine.search(source, keyword, 1);
                 boolean suspectSearch = responseQualities.subList(searchQualityStart, responseQualities.size()).stream()
                         .anyMatch(value -> value.equals("BUSINESS_ERROR") || value.equals("CHALLENGE_PAGE")
-                                || value.equals("PARKED_DOMAIN") || value.equals("UNRESOLVED_REDIRECT"));
+                                || value.equals("PARKED_DOMAIN") || value.equals("APP_UPGRADE_REQUIRED")
+                                || value.equals("UNRESOLVED_REDIRECT"));
                 String searchStatus = hits.isEmpty()
                         ? (suspectSearch ? "SEARCH_RESPONSE_SUSPECT" : "SEARCH_ZERO_UNVERIFIED") : "SEARCH_OK";
                 Log.i(TAG, clean(searchStatus
@@ -76,16 +77,21 @@ public final class CompatibilityProbeActivity extends Activity {
                     BookDetail detail = engine.detail(source, hits.get(0));
                     boolean suspect = responseQualities.subList(qualityStart, responseQualities.size()).stream()
                             .anyMatch(value -> value.equals("BUSINESS_ERROR") || value.equals("CHALLENGE_PAGE")
-                                    || value.equals("PARKED_DOMAIN"));
+                                    || value.equals("PARKED_DOMAIN") || value.equals("APP_UPGRADE_REQUIRED"));
                     Log.i(TAG, (suspect ? "DETAIL_SUSPECT" : "DETAIL_OK")
                             + " tocPresent=" + (detail.tocUrl() != null && !detail.tocUrl().isBlank()));
                     List<Chapter> chapters = engine.chapters(source, detail);
                     Log.i(TAG, clean("CATALOG_OK chapters=" + chapters.size()));
                     Chapter first = chapters.stream().filter(chapter -> !chapter.volume()).findFirst().orElse(null);
                     if (first != null) {
+                        int contentQualityStart = responseQualities.size();
                         var content = engine.content(source, detail, first,
                                 SourceEngine.nextReadableUrl(chapters, first));
-                        Log.i(TAG, clean("CONTENT_OK characters=" + (content.text() == null ? 0 : content.text().length())
+                        boolean suspectContent = responseQualities.subList(contentQualityStart, responseQualities.size()).stream()
+                                .anyMatch(value -> value.equals("BUSINESS_ERROR") || value.equals("APP_UPGRADE_REQUIRED")
+                                        || value.equals("CHALLENGE_PAGE") || value.equals("PARKED_DOMAIN"));
+                        Log.i(TAG, clean((suspectContent ? "CONTENT_SUSPECT" : "CONTENT_OK")
+                                + " characters=" + (content.text() == null ? 0 : content.text().length())
                                 + " resources=" + content.resources().size()));
                     }
                 }
