@@ -69,13 +69,16 @@ public final class LiveSourceProbe {
             Matcher titleMatch = Pattern.compile("(?is)<title[^>]*>(.*?)</title>").matcher(body);
             if (titleMatch.find()) title = titleMatch.group(1).replaceAll("<[^>]*>", "");
             String quality = ResponseSignals.quality(response);
-            responseQualities.add(quality);
+            responseQualities.addAll(ResponseSignals.probeSignals(request, response));
             String host;
             try { host = URI.create(response.url()).getHost(); }
             catch (Exception ignored) { host = "invalid-url"; }
             String requestHost;
             try { requestHost = URI.create(request.url()).getHost(); }
             catch (Exception ignored) { requestHost = "invalid-url"; }
+            String responsePath;
+            try { responsePath = URI.create(response.url()).getPath(); }
+            catch (Exception ignored) { responsePath = "invalid-url"; }
             String redirectHost = "";
             if (quality.equals("UNRESOLVED_REDIRECT")) {
                 String location = response.headers().getOrDefault("location", "");
@@ -83,7 +86,7 @@ public final class LiveSourceProbe {
                 catch (Exception ignored) { redirectHost = "invalid-url"; }
             }
             System.out.println(row("FETCH", host, Integer.toString(response.status()),
-                    Integer.toString(body.length()), title, quality
+                    Integer.toString(body.length()), title, quality + " path=" + responsePath
                             + (host.equals(requestHost) ? "" : " from=" + requestHost)
                             + (redirectHost.isBlank() ? "" : " to=" + redirectHost)));
             return response;
@@ -116,9 +119,7 @@ public final class LiveSourceProbe {
                     List<BookHit> hits = engine.search(source, keyword, 1);
                     String first = hits.isEmpty() ? "" : hits.get(0).name();
                     boolean suspectSearch = responseQualities.subList(qualityStart, responseQualities.size()).stream()
-                            .anyMatch(value -> value.equals("BUSINESS_ERROR") || value.equals("CHALLENGE_PAGE")
-                                    || value.equals("PARKED_DOMAIN") || value.equals("APP_UPGRADE_REQUIRED")
-                                    || value.equals("UNRESOLVED_REDIRECT"));
+                            .anyMatch(ResponseSignals::suspectEmptySearch);
                     String status = hits.isEmpty() ? (suspectSearch ? "RESPONSE_SUSPECT" : "ZERO_UNVERIFIED") : "OK";
                     System.out.println(row(source.name(), keyword, status,
                             Integer.toString(hits.size()), first, ""));

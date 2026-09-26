@@ -51,15 +51,19 @@ public final class CompatibilityProbeActivity extends Activity {
                     java.util.regex.Matcher titleMatch = java.util.regex.Pattern.compile("(?is)<title[^>]*>(.*?)</title>").matcher(body);
                     if (titleMatch.find()) title = titleMatch.group(1).replaceAll("<[^>]*>", "");
                     String quality = ResponseSignals.quality(response);
-                    responseQualities.add(quality);
+                    responseQualities.addAll(ResponseSignals.probeSignals(request, response));
                     String host;
                     try { host = new java.net.URI(response.url()).getHost(); }
                     catch (Exception ignored) { host = "invalid-url"; }
                     String requestHost;
                     try { requestHost = new java.net.URI(request.url()).getHost(); }
                     catch (Exception ignored) { requestHost = "invalid-url"; }
+                    String responsePath;
+                    try { responsePath = new java.net.URI(response.url()).getPath(); }
+                    catch (Exception ignored) { responsePath = "invalid-url"; }
                     Log.i(TAG, clean("FETCH method=" + request.method() + " webView=" + request.webView()
                             + " status=" + response.status() + " host=" + host
+                            + " path=" + responsePath
                             + (host.equals(requestHost) ? "" : " from=" + requestHost)
                             + " length=" + body.length() + " quality=" + quality + " title=" + title));
                     return response;
@@ -69,9 +73,7 @@ public final class CompatibilityProbeActivity extends Activity {
                 int searchQualityStart = responseQualities.size();
                 List<BookHit> hits = engine.search(source, keyword, 1);
                 boolean suspectSearch = responseQualities.subList(searchQualityStart, responseQualities.size()).stream()
-                        .anyMatch(value -> value.equals("BUSINESS_ERROR") || value.equals("CHALLENGE_PAGE")
-                                || value.equals("PARKED_DOMAIN") || value.equals("APP_UPGRADE_REQUIRED")
-                                || value.equals("UNRESOLVED_REDIRECT"));
+                        .anyMatch(ResponseSignals::suspectEmptySearch);
                 String searchStatus = hits.isEmpty()
                         ? (suspectSearch ? "SEARCH_RESPONSE_SUSPECT" : "SEARCH_ZERO_UNVERIFIED") : "SEARCH_OK";
                 Log.i(TAG, clean(searchStatus

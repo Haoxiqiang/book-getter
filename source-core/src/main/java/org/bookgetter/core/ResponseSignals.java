@@ -3,12 +3,46 @@ package org.bookgetter.core;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import java.net.URI;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
+import org.bookgetter.core.Models.FetchRequest;
 import org.bookgetter.core.Models.FetchResponse;
 
 /** Conservative response hints for probes; never a substitute for a source rule. */
 public final class ResponseSignals {
     private ResponseSignals() {}
+
+    /** Diagnostic hints only: a host migration or non-200 success does not prove a bad rule. */
+    public static List<String> probeSignals(FetchRequest request, FetchResponse response) {
+        List<String> signals = new ArrayList<>();
+        signals.add(quality(response));
+        if (response.status() >= 200 && response.status() < 300 && response.status() != 200)
+            signals.add("NON_200_SUCCESS");
+        try {
+            URI requested = URI.create(request.url());
+            URI returned = URI.create(response.url());
+            String before = requested.getHost();
+            String after = returned.getHost();
+            if (before != null && after != null && !before.equalsIgnoreCase(after))
+                signals.add("CROSS_HOST_REDIRECT");
+            String requestedPath = requested.getPath();
+            String returnedPath = returned.getPath();
+            if (requestedPath != null && !requestedPath.isBlank() && !requestedPath.equals("/")
+                    && (returnedPath == null || returnedPath.isBlank() || returnedPath.equals("/")))
+                signals.add("SEARCH_ENDPOINT_TO_ROOT");
+        } catch (IllegalArgumentException ignored) { /* Invalid URLs are diagnosed by the transport. */ }
+        return signals;
+    }
+
+    public static boolean suspectEmptySearch(String signal) {
+        return signal.equals("BUSINESS_ERROR") || signal.equals("CHALLENGE_PAGE")
+                || signal.equals("PARKED_DOMAIN") || signal.equals("APP_UPGRADE_REQUIRED")
+                || signal.equals("UNRESOLVED_REDIRECT") || signal.equals("EMPTY_RESPONSE")
+                || signal.equals("CROSS_HOST_REDIRECT") || signal.equals("SEARCH_ENDPOINT_TO_ROOT")
+                || signal.equals("NON_200_SUCCESS");
+    }
 
     public static String quality(FetchResponse response) {
         if (response.status() >= 300 && response.status() < 400) return "UNRESOLVED_REDIRECT";

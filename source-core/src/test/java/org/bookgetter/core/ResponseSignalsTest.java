@@ -1,12 +1,32 @@
 package org.bookgetter.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Map;
 import org.bookgetter.core.Models.FetchResponse;
+import org.bookgetter.core.Models.FetchRequest;
 import org.junit.jupiter.api.Test;
 
 final class ResponseSignalsTest {
+    @Test void crossHostAndAcceptedResponsesMakeEmptySearchUnverified() {
+        FetchRequest request = new FetchRequest("https://old.example/search?q=book");
+        FetchResponse migrated = new FetchResponse("https://new.example/", "<html>Home</html>", 200, Map.of());
+        assertTrue(ResponseSignals.probeSignals(request, migrated).contains("CROSS_HOST_REDIRECT"));
+        assertTrue(ResponseSignals.probeSignals(request, migrated).contains("SEARCH_ENDPOINT_TO_ROOT"));
+        assertTrue(ResponseSignals.suspectEmptySearch("CROSS_HOST_REDIRECT"));
+        assertTrue(ResponseSignals.suspectEmptySearch("SEARCH_ENDPOINT_TO_ROOT"));
+        assertTrue(ResponseSignals.probeSignals(new FetchRequest("https://new.example/modules/article/search.php"),
+                new FetchResponse("https://new.example/", "<html>Home</html>", 200, Map.of()))
+                .contains("SEARCH_ENDPOINT_TO_ROOT"));
+        FetchResponse accepted = new FetchResponse(request.url(), "<html>Pending</html>", 202, Map.of());
+        assertTrue(ResponseSignals.probeSignals(request, accepted).contains("NON_200_SUCCESS"));
+        assertFalse(ResponseSignals.probeSignals(request,
+                new FetchResponse(request.url(), "<html>Nothing found</html>", 200, Map.of()))
+                .stream().anyMatch(ResponseSignals::suspectEmptySearch));
+    }
+
     @Test void detectsTransportAndPageFailuresWithoutTreatingEveryZeroAsFailure() {
         assertEquals("UNRESOLVED_REDIRECT", quality(302, ""));
         assertEquals("ACCESS_DENIED", quality(403, "blocked"));
