@@ -93,6 +93,27 @@ final class SourceEngineTest {
         assertEquals("第九章", detailed.lastChapter());
     }
 
+    @Test void staleCatalogClassDoesNotFuzzilyMatchChapterContainers() {
+        String sourceTemplate = """
+            {"bookSourceUrl":"https://example.test","bookSourceName":"catalog",
+             "ruleToc":{"chapterList":"%s@tag.a","chapterName":"text","chapterUrl":"href"}}
+            """;
+        String html = "<div class='DivTd3'><a href='/one'>First chapter</a></div><div class='DivTd'>&nbsp;</div>";
+        Source stale = SourceImporter.parse(sourceTemplate.formatted("class.DivTd")).sources().get(0);
+        BookHit staleHit = new BookHit(stale.id(), "https://example.test/book", "Book", "", "", "", Kind.TEXT);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(), html, 200, Map.of()));
+        SourceFailure failure = assertThrows(SourceFailure.class,
+                () -> engine.chapters(stale, new BookDetail(staleHit, staleHit.url(), List.of())));
+        assertEquals(Stage.CATALOG, failure.stage);
+        assertEquals("ruleToc.chapterList", failure.field);
+
+        Source corrected = SourceImporter.parse(sourceTemplate.formatted("class.DivTd3")).sources().get(0);
+        BookHit correctedHit = new BookHit(corrected.id(), staleHit.url(), "Book", "", "", "", Kind.TEXT);
+        List<Chapter> chapters = engine.chapters(corrected, new BookDetail(correctedHit, correctedHit.url(), List.of()));
+        assertEquals(1, chapters.size());
+        assertEquals("https://example.test/one", chapters.get(0).url());
+    }
+
     @Test void importSearchDetailCatalogContent() {
         Source source = SourceImporter.parse(sourceJson).sources().get(0);
         Transport transport = request -> {
