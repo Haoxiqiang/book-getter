@@ -6,6 +6,8 @@
 
 随后[编码宿主专项](js-host-encoding-probe.md)补 `java.base64Decode` 字符串/字符集和 `java.encodeURI` 的 `URLEncoder` 语义。和图书原搜索规则现能用双重编码形成请求，但站点返回 HTTP 403；101 言情仍在重定向后 HTTP 404，未执行解码列表。两站均未读取小说内容。
 
+[聚合源精确筛选记录](aggregate-source-freshness-probe.md)纠正同名速读谷 `.co/.com` 被子串过滤混测：前者 POST 跨域跳转后 JVM 最终 GET 搜索表单、Android 最终同页但未观测逐跳方法；后者证书链失败。两条均未进入有效列表，不抓正文，也不把全量 3907 记录当成 3907 个独立可用站点。
+
 ## 范围与可复现性
 
 来源：[吉的书源集页面](https://source.jwyihao.top/)所列 9 个原始 JSON 文件。Raw、GitHub Proxy、jsDelivr 为同一文件的分发镜像，只取 Raw 一份；9 个文件展开为 11 条书源，按规范化 `bookSourceUrl` 去重后仍为 11 条，无重复项。本地快照 ID：`20260926-152117-ccb9324c`。原始 JSON、去重 JSON、SHA-256 索引保存在 `source-catalog/snapshots/<ID>/`，默认不纳入 Git；更新说明见[书源管理目录](../source-catalog/README.md)。

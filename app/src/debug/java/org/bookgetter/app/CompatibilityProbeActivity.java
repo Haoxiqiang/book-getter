@@ -44,7 +44,9 @@ public final class CompatibilityProbeActivity extends Activity {
                 AndroidTransport transport = new AndroidTransport(this);
                 String json = transport.fetch(new FetchRequest(catalogUrl)).body();
                 Source source = SourceImporter.parse(json).sources().stream()
-                        .filter(item -> item.id().contains(sourceFilter) || item.name().contains(sourceFilter))
+                        .filter(item -> sourceFilter.startsWith("=")
+                                ? item.id().equals(sourceFilter.substring(1))
+                                : item.id().contains(sourceFilter) || item.name().contains(sourceFilter))
                         .findFirst().orElseThrow(() -> new IllegalArgumentException("No source: " + sourceFilter));
                 List<String> responseQualities = new java.util.ArrayList<>();
                 Transport observed = request -> {
@@ -67,10 +69,11 @@ public final class CompatibilityProbeActivity extends Activity {
                     String responsePath;
                     try { responsePath = new java.net.URI(response.url()).getPath(); }
                     catch (Exception ignored) { responsePath = "invalid-url"; }
-                    Log.i(TAG, clean("FETCH method=" + request.method() + " webView=" + request.webView()
+                    Log.i(TAG, clean("FETCH requestMethod=" + request.method() + " webView=" + request.webView()
                             + " status=" + response.status() + " host=" + host
                             + " path=" + responsePath
                             + (host.equals(requestHost) ? "" : " from=" + requestHost)
+                            + (response.url().equals(request.url()) ? "" : " redirectFinalMethod=UNOBSERVED")
                             + " length=" + body.length() + " quality=" + quality + " title=" + title));
                     return response;
                 };

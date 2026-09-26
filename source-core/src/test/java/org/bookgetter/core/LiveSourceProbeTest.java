@@ -31,6 +31,10 @@ final class LiveSourceProbeTest {
         assertFalse(LiveSourceProbe.matchesSource(other, "全本小说①, 文学迷"));
         assertFalse(LiveSourceProbe.matchesSource(other, " , "));
         assertTrue(LiveSourceProbe.matchesSource(other, ""));
+        Source shorterDomain = new Source("https://www.sudugu.co", "速读谷", Kind.TEXT, new JsonObject());
+        Source longerDomain = new Source("https://www.sudugu.com", "速读谷", Kind.TEXT, new JsonObject());
+        assertTrue(LiveSourceProbe.matchesSource(shorterDomain, "=https://www.sudugu.co"));
+        assertFalse(LiveSourceProbe.matchesSource(longerDomain, "=https://www.sudugu.co"));
     }
 
     @Test void gzipResponseIsDecodedBeforeRuleParsing() throws Exception {
