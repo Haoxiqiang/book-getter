@@ -935,11 +935,42 @@ final class SourceEngineTest {
                 && !item.message().contains("ajax")));
         assertTrue(diagnostics.stream().anyMatch(item -> item.code().equals("UNSUPPORTED_JS_HOST")
                 && item.field().equals("jsLib") && item.message().contains("head")));
-        assertTrue(diagnostics.stream().anyMatch(item -> item.code().equals("UNSUPPORTED_JS_HOST")
+        assertTrue(diagnostics.stream().anyMatch(item -> item.code().equals("PARTIAL_JS_HOST")
                 && item.field().equals("ruleToc.chapterList") && item.stage() == Stage.CATALOG
                 && item.message().contains("encodeURI")));
         assertTrue(diagnostics.stream().anyMatch(item -> item.code().equals("PARTIAL_JS_HOST")
                 && item.field().equals("ruleToc.chapterList") && item.message().contains("getString")));
+    }
+
+    @Test void base64DecodeAndEncodeUriUseDocumentedStringOverloads() throws Exception {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","searchUrl":"@js:java.encodeURI(key)",
+             "ruleSearch":{"bookList":"@js:java.base64Decode('5Lit5paH')"}}
+            """).sources().get(0);
+        RhinoRuntime runtime = new RhinoRuntime(request -> new FetchResponse(request.url(), "", 200, Map.of()));
+        assertEquals("中文", runtime.evaluate("java.base64Decode('5Lit5paH')", Map.of(), source));
+        String gbk = java.util.Base64.getEncoder().encodeToString("中文".getBytes("GBK"));
+        assertEquals("中文", runtime.evaluate("java.base64Decode('" + gbk + "','GBK')", Map.of(), source));
+        assertEquals("%E4%B8%AD%E6%96%87+%E7%A9%BA%E6%A0%BC",
+                runtime.evaluate("java.encodeURI('中文 空格')", Map.of(), source));
+        assertEquals("", runtime.evaluate("java.encodeURI('abc','invalid-charset')", Map.of(), source));
+        assertTrue(SourceImporter.preflight(source).stream().noneMatch(item ->
+                item.code().equals("UNSUPPORTED_JS_HOST")));
+        assertTrue(SourceImporter.preflight(source).stream().anyMatch(item ->
+                item.code().equals("PARTIAL_JS_HOST") && item.field().equals("ruleSearch.bookList")));
+        assertThrows(Exception.class, () -> runtime.evaluate("java.base64Decode('YQ==',0)", Map.of(), source));
+
+        com.google.gson.JsonObject actualRule = new com.google.gson.JsonObject();
+        actualRule.addProperty("bookSourceUrl", "https://example.test");
+        String template = "https://example.test/book/search.list.php?keyword={{java.encodeURI(java.encodeURI(key))}}"
+                + ",{\"headers\":{\"referer\":\"https://example.test/book/search.php?keyword={{java.encodeURI(key)}}\"}}";
+        actualRule.addProperty("searchUrl", template);
+        Source encodedSource = new Source("https://example.test", "encoded", Kind.TEXT, actualRule);
+        FetchRequest planned = new RequestPlanner(runtime).plan(template, encodedSource, "中文 空格", 1, encodedSource.id());
+        assertEquals("https://example.test/book/search.list.php?keyword=%25E4%25B8%25AD%25E6%2596%2587%2B%25E7%25A9%25BA%25E6%25A0%25BC",
+                planned.url());
+        assertEquals("https://example.test/book/search.php?keyword=%E4%B8%AD%E6%96%87+%E7%A9%BA%E6%A0%BC",
+                planned.headers().get("referer"));
     }
 
     @Test void jsonPathSearchUsesStructuredResults() {

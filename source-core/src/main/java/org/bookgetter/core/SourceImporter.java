@@ -15,7 +15,8 @@ public final class SourceImporter {
     private static final Pattern HOST_CALL = Pattern.compile("\\bjava\\.([A-Za-z_$][A-Za-z0-9_$]*)\\s*\\(");
     private static final Set<String> PROVIDED_HOST = Set.of("ajax", "put", "md5Encode", "base64Encode", "timeFormatUTC");
     private static final Set<String> PARTIAL_HOST = Set.of("get", "post", "getString", "getElement",
-            "getElements", "setContent", "t2s", "toast", "longToast", "startBrowserAwait");
+            "getElements", "setContent", "t2s", "toast", "longToast", "startBrowserAwait",
+            "base64Decode", "encodeURI");
     private SourceImporter() {}
 
     public static ImportResult parse(String text) {

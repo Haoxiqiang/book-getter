@@ -1,6 +1,8 @@
 package org.bookgetter.core;
 
 import com.google.gson.Gson;
+import java.net.URLEncoder;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.security.MessageDigest;
@@ -106,6 +108,28 @@ public final class RhinoRuntime implements ScriptRuntime {
                 @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
                     String value = args.length == 0 ? "" : Context.toString(args[0]);
                     return Base64.getEncoder().encodeToString(value.getBytes(StandardCharsets.UTF_8));
+                }
+            });
+            ScriptableObject.putProperty(java, "base64Decode", new BaseFunction() {
+                @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
+                    if (args.length == 0 || args[0] == null || args[0] == Undefined.instance) return "";
+                    if (args.length > 1 && args[1] instanceof Number)
+                        throw Context.reportRuntimeError("java.base64Decode flags overload is unavailable");
+                    String value = Context.toString(args[0]);
+                    String encoding = args.length > 1 && args[1] != Undefined.instance
+                            ? Context.toString(args[1]) : "UTF-8";
+                    try { return new String(Base64.getMimeDecoder().decode(value), Charset.forName(encoding)); }
+                    catch (Exception error) { throw Context.throwAsScriptRuntimeEx(error); }
+                }
+            });
+            ScriptableObject.putProperty(java, "encodeURI", new BaseFunction() {
+                @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
+                    String value = args.length == 0 || args[0] == null || args[0] == Undefined.instance
+                            ? "" : Context.toString(args[0]);
+                    String encoding = args.length > 1 && args[1] != Undefined.instance
+                            ? Context.toString(args[1]) : "UTF-8";
+                    try { return URLEncoder.encode(value, encoding); }
+                    catch (Exception ignored) { return ""; }
                 }
             });
             ScriptableObject.putProperty(java, "md5Encode", new BaseFunction() {
