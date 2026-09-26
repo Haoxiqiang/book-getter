@@ -1,0 +1,61 @@
+# 上游书源搜索实测（2026-09-26）
+
+## 范围与可复现性
+
+来源：[吉的书源集页面](https://source.jwyihao.top/)所列 9 个原始 JSON 文件。Raw、GitHub Proxy、jsDelivr 为同一文件的分发镜像，只取 Raw 一份；9 个文件展开为 11 条书源，按规范化 `bookSourceUrl` 去重后仍为 11 条，无重复项。本地快照 ID：`20260926-152117-ccb9324c`。原始 JSON、去重 JSON、SHA-256 索引保存在 `source-catalog/snapshots/<ID>/`，默认不纳入 Git；更新说明见[书源管理目录](../source-catalog/README.md)。
+
+测试词覆盖三本中文原创网文（《诡秘之主》《斗破苍穹》《凡人修仙传》）和两本中文译名轻小说（《无职转生》《刀剑神域》）。这只是不同类型的搜索探针，并不预设每个轻小说站点都应收录中文原创网文。网页自身说明该书源集主要面向轻小说，对国内原创网络文学另有类别限制。
+
+使用本工程 `SourceEngine.search(source, title, 1)`，每次请求间隔 1.5 秒，JVM HTTP 连接/请求超时 12/15 秒。首次探针测《诡秘之主》《无职转生》，后续从管理目录当前快照测另外三词。复测前可运行：
+
+```sh
+./gradlew :source-catalog:updateCatalog :source-catalog:verifyCatalog
+./gradlew :source-core:liveSourceProbe -PprobeQueries=诡秘之主,斗破苍穹,凡人修仙传,无职转生,刀剑神域
+```
+
+`liveSourceProbe` 是手动运行的网络探针，不进入确定性单元测试；它使用 JVM HTTP 客户端，不能代替 Android WebView/登录态测试。实时结果可能随网络、站点防护、账号及上游规则更新变化。不要高频反复运行。
+
+## 结果
+
+共 11 源 × 5 词 = 55 次搜索尝试，当前工程 **0 次得到可解析结果**。这不是“55 次零命中”：每次都在得到有效搜索结果之前失败。按源归纳如下；同一源的 5 词症状基本一致。
+
+| 书源 | 主要观测 | 归因边界 |
+| --- | --- | --- |
+| 哔哩轻小说🏷 | JS `TypeError: Cannot read property "1" from null` | 请求/规则脚本未成功执行；尚不能判断站点内容 |
+| 哔哩轻小说•台 | `WebView request needs Android runtime` | JVM 探针不支持该源要求的 WebView；需 Android 登录/页面测试 |
+| 轻之文库轻小说 | TLS 握手被远端关闭 | 本次网络不可达或站点限制；不能定性为解析规则错误 |
+| 三七轻小说 | `errorReg is not defined` | 依赖的脚本函数未在当前规则宿主提供 |
+| 轻小说文库 | `MalformedJsonException`，请求规划阶段 | 源中使用的 Legado 模板/选项语法尚未正确解释；页面也注明需登录 |
+| lk轻之国度 | `cookie is not defined` | 依赖 Cookie/脚本宿主对象；页面注明需先登录 |
+| rezero | 搜索地址中残留 `{{java.put('key',key)}}`，URL 非法 | 模板内 JS 表达式及共享变量未实现；该站页面说明本身仅有一本书 |
+| 轻小说机翻🤖 | Rhino `missing ; before statement` | 源规则脚本与当前 JS 运行环境/模板语法不兼容 |
+| 真白萌 | HTTP 403 | 站点防护或未登录；页面注明需登录且有 CF/频率限制 |
+| ESJ Zone | 部分请求超时；其他请求遇到 CSS `||` 不支持 | 网络与复合选择器兼容是两个独立问题 |
+| 再漫画 | 将规则内 URL/模板误当作 CSS，选择器解析失败 | 规则语法/JS 求值不兼容；漫画源也不是文本小说命中基准 |
+
+因此目前不能报告任何一本作品在这 11 个源中的真实“有/无”，也不能对详情、目录或正文做可靠在线闭环。确定性本地模拟站点的导入→搜索→目录→导出已通过，见[验证记录](verification.md)；上表专门暴露真实 Legado 书源兼容差距。
+
+## 下一步兼容工作优先级
+
+1. 先建立分阶段诊断和规则回归夹具；补 `{{...}}`、`<js>...</js>`、`@js:`、`||` 复合规则及 Legado 全局函数/变量语义，避免仅有模糊异常。
+2. 实现最小受控 JS 宿主：Cookie/缓存变量、`java.put/get`、必要的网络 API；按书源逐项白名单并测试，不能直接开放任意 Java 访问。
+3. 在 Android 端用可手动登录的环境复测 WebView/403 源，把账号/网络问题与规则错误分开；不绕过网站访问控制。
+4. 每修复一源，先验证搜索的实际命中、去重和结果字段，再测详情/目录；正文只用明确允许的短样本进行验证。
+
+参考资料：[上游页面及使用要求](https://source.jwyihao.top/)、[上游仓库](https://github.com/jiwangyihao/source-j-legado)。完整上游书源不随工程再分发。
+
+## 后续修复与整书验收（同日）
+
+上表是**修复前的基线**，不能再当作当前所有书源的状态。随后补了 ES6 JS、请求模板表达式、JSONPath `||` 回退、可缺省字段、规则文本插值、JS 中惰性 JSON 字段插值、`jsLib` 和部分受控宿主方法。现在“轻小说机翻🤖”源以《无职转生》可返回 20 条搜索结果；第一条书的详情、23 章目录、首章正文均通过，整书 23 章 TXT 导出成功（564117 字节）。
+
+新增 `batchDownloadProbe`：按请求限速（最低 1.5 秒）、逐章本地缓存、失败日志与可续跑的每书 SHA-256 清单，在 `downloads/batch/` 中存放本地文件；该目录由 Git 忽略。首批验收目标 3 本已达成，分别完整抓取 16、4、14 章，清单验证通过。可复测：
+
+```sh
+./gradlew :source-core:batchDownloadProbe -PbatchTarget=3 -PbatchMaxChapters=40 -PbatchMaxPages=3 -PbatchDelayMs=2000
+```
+
+这**不等于规则完善或 100 本达标**。目前 `java.t2s` 仅是保留原文的兼容占位，源/书变量仅提供缺省值，直链下载的可选规则错误不会阻塞文本目录，其他 10 个源尚未完成同等级的在线闭环。批量任务只统计拥有完整 TXT 和匹配哈希清单的书，不能用搜索命中数、部分章节缓存或文件名数量充数。
+
+进一步加入 `<js>...</js>` 规则以及 `java.put/get` 的源级变量后，`rezero` 源用关键词 `RE0` 搜索返回 1 本，详情成功，目录解析出 887 章，首章正文 1979 字符；尚未抓完整本，因此不计入整书数。可用 `-PprobeSource=re0zero.top -PprobeQueries=RE0 -PprobeCaptureFirst=true` 复测。
+
+针对其他站点的只读连通性检查：哔哩轻小说的 `search_guard=js` 返回 HTTP 403；轻小说文库搜索地址跳转到 `wenku8.net` 后返回 HTTP 403；三七轻小说搜索地址 HTTP 200 但正文仅约 975 字节，为源脚本所针对的防护场景。这些观察说明当前网络环境的访问限制和规则引擎差距需分开处理，不应绕过站点防护或将 403 解释成“无书”。

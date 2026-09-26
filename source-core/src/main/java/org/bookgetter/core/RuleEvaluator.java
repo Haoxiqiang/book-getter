@@ -1,0 +1,231 @@
+package org.bookgetter.core;
+
+import com.jayway.jsonpath.JsonPath;
+import com.google.gson.JsonParser;
+import java.net.URI;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import javax.xml.xpath.XPathConstants;
+import javax.xml.xpath.XPathFactory;
+import org.bookgetter.core.Models.Source;
+import org.jsoup.Jsoup;
+import org.jsoup.helper.W3CDom;
+import org.jsoup.nodes.Element;
+import org.jsoup.nodes.Node;
+import org.w3c.dom.NodeList;
+
+/** Supported subset: CSS, XPath, JSONPath, regex and JS, with a single extraction action. */
+public final class RuleEvaluator {
+    private final ScriptRuntime script;
+    public RuleEvaluator(ScriptRuntime script) { this.script = script; }
+
+    public List<Object> many(String rule, Object input, String baseUrl, Source source) {
+        if (rule == null || rule.isBlank()) return List.of();
+        String value = rule.trim();
+        if (value.startsWith("<js>") && value.endsWith("</js>"))
+            return normalizeScript(script.evaluate(value.substring(4, value.length() - 5),
+                    Map.of("result", scriptInput(input), "baseUrl", baseUrl), source));
+        int chainedJs = value.indexOf("\n@js:");
+        if (chainedJs >= 0) {
+            List<Object> initial = many(value.substring(0, chainedJs), input, baseUrl, source);
+            return normalize(script.evaluate(value.substring(chainedJs + 5), Map.of("result", initial.stream().map(Object::toString).toList(), "baseUrl", baseUrl), source));
+        }
+        if (value.startsWith("@js:")) return normalizeScript(script.evaluate(value.substring(4), Map.of("result", scriptInput(input), "baseUrl", baseUrl), source));
+        if (value.contains("||")) {
+            for (String alternative : value.split("\\|\\|")) {
+                try {
+                    List<Object> found = many(alternative.trim(), input, baseUrl, source);
+                    if (!found.isEmpty() && found.stream().anyMatch(item -> item != null && !item.toString().isBlank()))
+                        return found;
+                } catch (com.jayway.jsonpath.PathNotFoundException ignored) {
+                    // A missing JSON field is expected when trying the next alternative.
+                }
+            }
+            return List.of();
+        }
+        if (value.startsWith("@json:") || value.startsWith("$.") || value.startsWith("$[")) {
+            String path = value.startsWith("@json:") ? value.substring(6) : value;
+            try {
+                return normalize(JsonPath.read(input instanceof String ? (String) input : new com.google.gson.Gson().toJson(input), path));
+            } catch (com.jayway.jsonpath.PathNotFoundException ignored) {
+                return List.of();
+            }
+        }
+        if (value.startsWith("@xpath:") || value.startsWith("//")) {
+            try {
+                // Most book-source XPath rules use unprefixed HTML names (e.g. //a).
+                // jsoup otherwise places HTML elements in the XHTML namespace, where //a matches nothing.
+                org.w3c.dom.Document document = new W3CDom().namespaceAware(false).fromJsoup(Jsoup.parse(input.toString(), baseUrl));
+                NodeList nodes = (NodeList) XPathFactory.newInstance().newXPath().evaluate(value.replaceFirst("^@xpath:", ""), document, XPathConstants.NODESET);
+                List<Object> result = new ArrayList<>();
+                for (int i = 0; i < nodes.getLength(); i++) result.add(nodes.item(i).getTextContent());
+                return result;
+            } catch (Exception e) { throw new IllegalArgumentException("Invalid XPath rule: " + value, e); }
+        }
+        if (value.startsWith("@regex:")) {
+            Matcher matcher = Pattern.compile(value.substring(7), Pattern.DOTALL).matcher(input.toString());
+            List<Object> result = new ArrayList<>();
+            while (matcher.find()) result.add(matcher.group());
+            return result;
+        }
+        String selector = value.replaceFirst("^@css:", "").split("@", 2)[0];
+        Element element = input instanceof Element e ? e : Jsoup.parse(input.toString(), baseUrl);
+        return new ArrayList<>(element.select(normalizeSelector(selector)));
+    }
+
+    public String one(String rule, Object input, String baseUrl, Source source, boolean url) {
+        if (rule == null || rule.isBlank()) return "";
+        String value = rule.trim();
+        if (value.startsWith("<js>") && value.endsWith("</js>")) {
+            Object evaluated = script.evaluate(value.substring(4, value.length() - 5),
+                    Map.of("result", scriptInput(input), "baseUrl", baseUrl), source);
+            String text = evaluated == null ? "" : evaluated.toString().trim();
+            return url && !text.isBlank() ? absolute(baseUrl, text) : text;
+        }
+        int chainedJs = value.indexOf("\n@js:");
+        if (chainedJs >= 0) {
+            String initial = one(value.substring(0, chainedJs), input, baseUrl, source, false);
+            Object changed = script.evaluate(value.substring(chainedJs + 5), Map.of("result", initial, "baseUrl", baseUrl), source);
+            String text = changed == null ? "" : changed.toString();
+            return url && !text.isBlank() ? absolute(baseUrl, text) : text;
+        }
+        if (value.startsWith("@js:")) {
+            String code = expandScriptTemplate(value.substring(4), input, baseUrl, source);
+            Object evaluated = script.evaluate(code, Map.of("result", scriptInput(input), "baseUrl", baseUrl), source);
+            String text = evaluated == null ? "" : evaluated.toString();
+            return url && !text.isBlank() ? absolute(baseUrl, text) : text;
+        }
+        if (value.contains("{{")) {
+            String text = expandTemplate(value, input, baseUrl, source).trim();
+            return url && !text.isBlank() ? absolute(baseUrl, text) : text;
+        }
+        String[] regex = value.split("##", -1);
+        value = regex[0];
+        // Legado field rules may address the current list item directly, without a selector.
+        if (value.equals("text") || value.equals("@text") || value.equals("html") || value.equals("@html")
+                || value.equals("ownText") || value.equals("@ownText") || value.equals("href")
+                || value.equals("@href") || value.equals("src") || value.equals("@src")) {
+            String action = value.startsWith("@") ? value.substring(1) : value;
+            String result = input instanceof Element element ? elementValue(element, action) : input.toString();
+            if (regex.length > 1) result = replaceRule(result, regex);
+            result = result.trim();
+            return url && !result.isBlank() ? absolute(baseUrl, result) : result;
+        }
+        int actionAt = value.lastIndexOf('@');
+        boolean hasAction = actionAt > 0 && !value.startsWith("@json:") && !value.startsWith("@xpath:");
+        String action = hasAction ? value.substring(actionAt + 1) : "text";
+        String selector = hasAction ? value.substring(0, actionAt) : value;
+        List<Object> items = selector.isBlank() ? List.of(input) : many(selector, input, baseUrl, source);
+        List<String> strings = new ArrayList<>();
+        for (Object item : items) {
+            if (item instanceof Element element) {
+                strings.add(elementValue(element, action));
+            } else strings.add(String.valueOf(item));
+        }
+        String result = String.join("\n", strings);
+        if (regex.length > 1) result = replaceRule(result, regex);
+        result = result.trim();
+        return url && !result.isBlank() ? absolute(baseUrl, result) : result;
+    }
+
+    private static String elementValue(Element element, String action) {
+        return switch (action) {
+            case "text" -> element.text();
+            case "html" -> element.html();
+            case "ownText" -> element.ownText();
+            default -> element.attr(action);
+        };
+    }
+
+    private static String replaceRule(String input, String[] ruleParts) {
+        if (ruleParts[1].isEmpty()) return input;
+        Matcher matcher = Pattern.compile(ruleParts[1], Pattern.DOTALL).matcher(input);
+        String replacement = ruleParts.length > 2 ? ruleParts[2] : "";
+        if (ruleParts.length > 3) {
+            return matcher.find() ? Pattern.compile(ruleParts[1], Pattern.DOTALL)
+                    .matcher(matcher.group()).replaceFirst(replacement) : "";
+        }
+        return matcher.replaceAll(replacement);
+    }
+
+    private static List<Object> normalize(Object value) {
+        if (value == null) return List.of();
+        if (value instanceof List<?> list) return new ArrayList<>(list);
+        return List.of(value);
+    }
+
+    private static List<Object> normalizeScript(Object value) {
+        if (value instanceof String string && string.startsWith("[") && string.endsWith("]")) {
+            try {
+                List<Object> result = new ArrayList<>();
+                JsonParser.parseString(string).getAsJsonArray().forEach(item -> result.add(item.isJsonPrimitive()
+                        ? item.getAsString() : new com.google.gson.Gson().fromJson(item, Object.class)));
+                return result;
+            } catch (Exception ignored) { /* Not a JSON array; keep literal text. */ }
+        }
+        return normalize(value);
+    }
+
+    private static Object scriptInput(Object input) {
+        return input instanceof Map<?, ?> ? input : input.toString();
+    }
+
+    private String expandTemplate(String template, Object input, String baseUrl, Source source) {
+        Matcher matcher = Pattern.compile("\\{\\{([^{}]+)}}").matcher(template);
+        StringBuffer result = new StringBuffer();
+        while (matcher.find()) {
+            String expression = matcher.group(1).trim();
+            String value = expression.startsWith("$") || expression.startsWith("@")
+                    ? one(expression, input, baseUrl, source, false)
+                    : String.valueOf(script.evaluate(expression, Map.of("result", scriptInput(input), "baseUrl", baseUrl), source));
+            matcher.appendReplacement(result, Matcher.quoteReplacement(value));
+        }
+        matcher.appendTail(result);
+        return result.toString();
+    }
+
+    private String expandScriptTemplate(String template, Object input, String baseUrl, Source source) {
+        Matcher matcher = Pattern.compile("\\{\\{([^{}]+)}}").matcher(template);
+        StringBuffer result = new StringBuffer();
+        boolean hasDeferredPath = false;
+        while (matcher.find()) {
+            String expression = matcher.group(1).trim();
+            String replacement;
+            if (expression.matches("\\$\\.[A-Za-z_$][A-Za-z0-9_$.]*")) {
+                String accessor = "__bgGet(" + new com.google.gson.Gson().toJson(expression.substring(2)) + ")";
+                replacement = inTemplateLiteral(template, matcher.start()) ? "${" + accessor + "}" : accessor;
+                hasDeferredPath = true;
+            } else {
+                replacement = expression.equals("baseUrl") ? baseUrl
+                        : expandTemplate("{{" + expression + "}}", input, baseUrl, source);
+            }
+            matcher.appendReplacement(result, Matcher.quoteReplacement(replacement));
+        }
+        matcher.appendTail(result);
+        if (!hasDeferredPath) return result.toString();
+        return "function __bgGet(path) { var value = result; var keys = path.split('.'); "
+                + "for (var i = 0; i < keys.length; i++) { if (value == null) return ''; value = value[keys[i]]; } "
+                + "return value == null ? '' : value; }\n" + result;
+    }
+
+    private static boolean inTemplateLiteral(String text, int end) {
+        boolean inside = false;
+        for (int i = 0; i < end; i++) if (text.charAt(i) == '`' && (i == 0 || text.charAt(i - 1) != '\\')) inside = !inside;
+        return inside;
+    }
+
+    private static String normalizeSelector(String selector) {
+        if (selector.startsWith("class.")) return "." + selector.substring(6);
+        if (selector.startsWith("id.")) return "#" + selector.substring(3);
+        if (selector.startsWith("tag.")) return selector.substring(4);
+        return selector;
+    }
+
+    public static String absolute(String base, String path) {
+        try { return URI.create(base).resolve(path).toString(); }
+        catch (Exception ignored) { return path; }
+    }
+}

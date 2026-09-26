@@ -1,0 +1,47 @@
+plugins { id 'java-library' }
+java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
+dependencies {
+    api 'com.google.code.gson:gson:2.14.0'
+    implementation 'org.jsoup:jsoup:1.23.2'
+    implementation 'com.jayway.jsonpath:json-path:3.0.0'
+    implementation 'org.mozilla:rhino:1.7.15'
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
+    testImplementation project(':export')
+}
+test { useJUnitPlatform() }
+
+tasks.register('liveSourceProbe', JavaExec) {
+    group = 'verification'
+    description = 'Opt-in, rate-limited live search probe of the source-j-legado sources.'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'org.bookgetter.core.LiveSourceProbe'
+    workingDir = rootProject.projectDir
+    args '--catalog', rootProject.file('source-catalog').absolutePath
+    if (project.hasProperty('probeSource')) {
+        args '--source', project.property('probeSource').toString()
+    }
+    if (project.hasProperty('probeCaptureFirst') && project.property('probeCaptureFirst').toString().toBoolean()) {
+        args '--capture-first'
+    }
+    if (project.hasProperty('probeExportFirst')) {
+        args '--export-first', rootProject.file(project.property('probeExportFirst').toString()).absolutePath
+    }
+    if (project.hasProperty('probeQueries')) {
+        args project.property('probeQueries').toString().split(',').collect { it.trim() }
+    }
+}
+
+tasks.register('batchDownloadProbe', JavaExec) {
+    group = 'verification'
+    description = 'Opt-in, rate-limited, resumable live book download verification.'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'org.bookgetter.core.BatchDownloadProbe'
+    workingDir = rootProject.projectDir
+    args rootProject.file('source-catalog').absolutePath,
+            rootProject.file('downloads/batch').absolutePath,
+            project.findProperty('batchSource') ?: 'novelia.cc',
+            project.findProperty('batchTarget') ?: '3',
+            project.findProperty('batchMaxChapters') ?: '40',
+            project.findProperty('batchMaxPages') ?: '10',
+            project.findProperty('batchDelayMs') ?: '2000'
+}

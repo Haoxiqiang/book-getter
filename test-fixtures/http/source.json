@@ -1,0 +1,25 @@
+{
+  "bookSourceUrl": "http://10.0.2.2:18765",
+  "bookSourceName": "Local device fixture",
+  "bookSourceType": 0,
+  "searchUrl": "/search",
+  "ruleSearch": {
+    "bookList": "div.book",
+    "name": "a@text",
+    "bookUrl": "a@href",
+    "author": "span.author@text"
+  },
+  "ruleBookInfo": {
+    "name": "h1@text",
+    "author": "span.author@text",
+    "tocUrl": "a.toc@href"
+  },
+  "ruleToc": {
+    "chapterList": "li.chapter",
+    "chapterName": "a@text",
+    "chapterUrl": "a@href"
+  },
+  "ruleContent": {
+    "content": "div.content@html"
+  }
+}
