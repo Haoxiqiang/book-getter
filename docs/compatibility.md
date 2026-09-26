@@ -26,6 +26,8 @@
 
 [异构机制广度探针](aoaostar-mechanism-breadth-probe.md)再选 10 个不同站点：POPO 在 JVM/Android 搜索 10 条且首条详情通过，但原规则寻找“章回列表”、现页面只有“章回”链接，目录阶段停在上游规则漂移；百合会搜索被重定向到 HTTP 200 登录页，现两端均明确报 `LOGIN_REQUIRED`，不再伪装成零命中。其余 XPath、GBK POST、图片/文件候选多在跳转、403、TLS 或超时阶段受阻，仍不能称相关规则兼容。
 
+[URL 首匹配与分页回目录探针](url-first-and-pagination-probe.md)按官方 `isUrl=true` 的默认 DOM 行为修正了多链接行：URL 只取首个匹配；夜伴书屋因此在 JVM/Android 从非法详情 URL 前进至搜索 59、目录 71、单章 3 页。若 `nextContentUrl` 精确指回书籍/目录页，核心停止分页并报 `PAGINATION_TO_CATALOG`，避免将目录页当正文；这不证明全站内容净化或所有分页规则。另一个源的 `java.post(...).header("Location")` 暴露尚未实现的无自动跳转响应对象宿主，不能仅映射为现有 `java.ajax`。
+
 [XIU2 关键词/69 书吧专项](xiu2-keyword-and-69shuba-probe.md)提供另一条 JSON API 跨端正对照：酷我小说换用站内有结果的“修仙”后到 2052 项目录与单章，独立 API 计数一致；先前的 `data=[]` 只说明原词无结果。69书吧.com 的 `<js>` 本身不是合法 JS，另一条旧域 POST 跳转后变 GET，均不能为提高成功率而在核心里猜测修补。
 
 目前还未复刻原版的 `bookUrlPattern` 直达详情回退、完整变量作用域与优先级、跨源换源和批量正文。书籍变量、目录分卷与 VIP 标记仅有基础子集，遇到依赖其他层级或组合行为的书源，仍须用阶段错误和预检结果识别后再扩展。

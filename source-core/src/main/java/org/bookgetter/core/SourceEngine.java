@@ -183,7 +183,12 @@ public final class SourceEngine {
                     if (joined.length() > 0) joined.append('\n');
                     joined.append(value);
                     String following = field(source, "ruleContent", "nextContentUrl", response.body(), response.url(), true);
-                    page = following.equals(nextChapterUrl) ? "" : following;
+                    if (!following.isBlank() && (following.equals(book.hit().url()) || following.equals(book.tocUrl()))) {
+                        diagnostics.accept(new Diagnostic(Stage.CONTENT, "PAGINATION_TO_CATALOG",
+                                "Pagination rule points to the book/catalog page; stopped after the current content page",
+                                Severity.WARNING, "ruleContent.nextContentUrl"));
+                        page = "";
+                    } else page = following.equals(nextChapterUrl) ? "" : following;
                 }
                 text = joined.toString();
             }

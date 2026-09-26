@@ -42,6 +42,27 @@ final class SourceEngineTest {
         assertEquals("Second", hits.get(1).name());
     }
 
+    @Test void urlFieldUsesFirstMatchedDomAttributeInsteadOfJoiningMultipleLinks() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","bookSourceName":"links",
+             "searchUrl":"/search?q={{key}}",
+             "ruleSearch":{"bookList":"tbody@tag.tr","name":"tag.td.0@text",
+               "bookUrl":"tag.a@href"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(), """
+            <table><tbody><tr><td><a href='/book/1432/'>First</a></td>
+              <td><a href='/txt/1432.html'>TXT</a></td></tr></tbody></table>
+            """, 200, Map.of()));
+        List<BookHit> hits = engine.search(source, "book", 1);
+        assertEquals(1, hits.size());
+        assertEquals("https://example.test/book/1432/", hits.get(0).url());
+        RuleEvaluator rules = new RuleEvaluator(new RhinoRuntime(request ->
+                new FetchResponse(request.url(), "", 200, Map.of())));
+        assertEquals("/book/1432/\n/txt/1432.html", rules.one("tag.a@href",
+                "<tr><td><a href='/book/1432/'>First</a></td><td><a href='/txt/1432.html'>TXT</a></td></tr>",
+                source.id(), source, false));
+    }
+
     @Test void embeddedScriptCanFeedJsonPathInListAndFieldRules() {
         Source source = SourceImporter.parse("""
             {"bookSourceUrl":"https://chain.test","searchUrl":"/search?q={{key}}",
@@ -391,6 +412,32 @@ final class SourceEngineTest {
         assertEquals("ruleContent.nextContentUrl", missingBoundary.field);
         assertEquals("joined", engine.content(source, book, chapter, "https://example.test/two").text());
         assertEquals(List.of("https://example.test/one", "https://example.test/one-2"), fetched);
+    }
+
+    @Test void contentPaginationStopsBeforeReturningToBookPageAndWarns() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","ruleContent":{
+              "content":"div.content@text","nextContentUrl":"a.next@href"}}
+            """).sources().get(0);
+        List<String> fetched = new java.util.ArrayList<>();
+        List<Diagnostic> warnings = new java.util.ArrayList<>();
+        Transport transport = request -> {
+            fetched.add(request.url());
+            String body = switch (request.url()) {
+                case "https://example.test/one" -> "<div class='content'>first</div><a class='next' href='/one-2'>Next</a>";
+                case "https://example.test/one-2" -> "<div class='content'>second</div><a class='next' href='/book'>Index</a>";
+                default -> throw new AssertionError("Fetched book page as chapter content: " + request.url());
+            };
+            return new FetchResponse(request.url(), body, 200, Map.of());
+        };
+        SourceEngine engine = new SourceEngine(transport, new RhinoRuntime(transport), warnings::add);
+        BookHit hit = new BookHit(source.id(), "https://example.test/book", "Book", "", "", "", Kind.TEXT);
+        BookDetail book = new BookDetail(hit, hit.url(), List.of());
+        Chapter chapter = new Chapter(hit.url(), "https://example.test/one", "One", 0, false, false);
+        assertEquals("first\nsecond", engine.content(source, book, chapter, "https://example.test/two").text());
+        assertEquals(List.of("https://example.test/one", "https://example.test/one-2"), fetched);
+        assertEquals("PAGINATION_TO_CATALOG", warnings.get(0).code());
+        assertEquals("ruleContent.nextContentUrl", warnings.get(0).field());
     }
 
     @Test void nextReadableChapterSkipsVolumeHeadings() {

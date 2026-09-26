@@ -278,7 +278,9 @@ public final class RuleEvaluator {
                 strings.add(elementValue(element, action));
             } else strings.add(String.valueOf(item));
         }
-        String result = String.join(action.equals("all") ? "" : "\n", strings);
+        // AnalyzeRule uses AnalyzeByJSoup.getString0 for URL fields: only the first match is a URL.
+        String result = url ? (strings.isEmpty() ? "" : strings.get(0))
+                : String.join(action.equals("all") ? "" : "\n", strings);
         if (regex.length > 1) result = replaceRule(result, regex);
         result = result.trim();
         return url && !result.isBlank() ? absolute(baseUrl, result) : result;

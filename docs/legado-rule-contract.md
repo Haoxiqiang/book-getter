@@ -29,6 +29,8 @@
 
 补充的[混合 JS/JSONPath 探针](mixed-js-jsonpath-probe.md)纠正了先前对 `{$.字段}` 的误读：官方 `AnalyzeByJSonPath.getString` 支持内嵌取值，`AnalyzeRule.splitSourceRule` 允许 `<js>...</js>` 后继续 JSONPath。JSON Map 上的 `href/text` 动作若不存在，必须返回空以允许 `||` 回退，不能把整张 Map 字符串化为有效 URL；但 JS 显式 `String(result)` 又可能依赖官方 Map 的字符串视图。两者要区分，且不开放 Java 反射。含 `,{URL选项}` 的相对章节链接只解析路径部分，保留选项供请求规划使用。
 
+[夜伴书屋探针](url-first-and-pagination-probe.md)进一步确认官方 `AnalyzeRule.getString(..., isUrl=true)` 对默认 DOM 规则调用 `AnalyzeByJSoup.getString0`：同一列表项有多个匹配链接时只取首个 URL，而非合并。分页规则若精确返回已知书籍/目录 URL，本工程作为安全扩展停止并告警 `PAGINATION_TO_CATALOG`；这与官方主要使用“下一章 URL”作边界的行为不能混同。
+
 ## 可执行测试矩阵
 
 | 层级 | 样本/夹具 | 通过条件 | 当前状态 |

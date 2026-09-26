@@ -133,3 +133,5 @@ XIU2 源再用宽词“修仙”验证酷我小说：先前“斗破苍穹”是
 关耳女频 86 源集合再抽 11 个不同域名：长佩的 `<js>→JSONPath` 列表链、豆瓣的 `{$.id}`/Map 回退与 URL 选项、猫耳 FM 的安全 Map 字符串视图依次暴露了兼容缺口。修复后 JVM/Android 分别验证长佩 10 搜索/7 目录、豆瓣 6 搜索/50 目录（VIP 33 与公开 API 价格标记同数）、猫耳 FM 40 搜索/6 音频目录；52书库 JVM 搜索 20/目录 78。喜马拉雅 HTTP 200 的 `needLogin=true` 现明确报登录前提。没有取付费正文、媒体或整书。[来源哈希、逐站状态与官方依据](mixed-js-jsonpath-probe.md)。
 
 同一 86 源集合另抽 10 个此前未深入的异构站点。POPO 的 POST 搜索在 JVM/Android 均得 10 条，首条详情通过，但目录链接规则“章回列表”与当前页面“章回”不符；百合会的 HTTP 200 搜索页其实是重定向后的登录页，现两端报 `LOGIN_REQUIRED`。其余多在网络、TLS、403/432 或失效入口阶段，不能据此断言 XPath、GBK POST、图片/文件规则通过。[逐站表与回归记录](aoaostar-mechanism-breadth-probe.md)。没有下载整书。
+
+再选 7 个具有正文下一页规则的站点：夜伴书屋的搜索行有两个链接，修正 URL 字段首匹配后，JVM/Android 均搜索 59、详情、目录 71、首条章节 3 页到正文；规则随后指回书籍页，现发 `PAGINATION_TO_CATALOG` 警告并停止。起舞中文明确停在尚未实现的 `java.post(...).header("Location")` 宿主；其余主要是证书、超时或域名出售页。[规则依据、逐站证据与命令](url-first-and-pagination-probe.md)。只取一章作规则验证，没有整书下载。

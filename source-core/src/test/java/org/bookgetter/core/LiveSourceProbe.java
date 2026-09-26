@@ -185,6 +185,10 @@ public final class LiveSourceProbe {
                                 int contentQualityStart = responseQualities.size();
                                 var content = engine.content(source, detail, firstChapter,
                                         SourceEngine.nextReadableUrl(chapters, firstChapter));
+                                fieldWarnings.stream().filter(warning -> warning.stage() == org.bookgetter.core.Models.Stage.CONTENT)
+                                        .map(warning -> warning.code() + " " + warning.field()).distinct()
+                                        .forEach(warning -> System.out.println(row(source.name(), keyword,
+                                                "CONTENT_WARNING", "", "", warning)));
                                 boolean suspectContent = responseQualities.subList(contentQualityStart, responseQualities.size()).stream()
                                         .anyMatch(value -> value.equals("BUSINESS_ERROR") || value.equals("APP_UPGRADE_REQUIRED")
                                                 || value.equals("CHALLENGE_PAGE") || value.equals("PARKED_DOMAIN"));

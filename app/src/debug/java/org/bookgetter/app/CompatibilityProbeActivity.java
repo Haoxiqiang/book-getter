@@ -76,8 +76,9 @@ public final class CompatibilityProbeActivity extends Activity {
                 };
                 java.util.Set<String> warnedFields = new java.util.HashSet<>();
                 SourceEngine engine = new SourceEngine(observed, new RhinoRuntime(observed), diagnostic -> {
-                    if (warnedFields.add(diagnostic.field()))
-                        Log.w(TAG, clean("FIELD_WARNING " + diagnostic.field()));
+                    String warning = diagnostic.code() + " " + diagnostic.field();
+                    if (warnedFields.add(warning))
+                        Log.w(TAG, clean("FIELD_WARNING " + warning));
                 });
                 Log.i(TAG, clean("START " + source.name() + " " + source.id() + " key=" + keyword));
                 int searchQualityStart = responseQualities.size();
