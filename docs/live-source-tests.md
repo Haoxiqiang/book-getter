@@ -134,4 +134,6 @@ XIU2 源再用宽词“修仙”验证酷我小说：先前“斗破苍穹”是
 
 同一 86 源集合另抽 10 个此前未深入的异构站点。POPO 的 POST 搜索在 JVM/Android 均得 10 条，首条详情通过，但目录链接规则“章回列表”与当前页面“章回”不符；百合会的 HTTP 200 搜索页其实是重定向后的登录页，现两端报 `LOGIN_REQUIRED`。其余多在网络、TLS、403/432 或失效入口阶段，不能据此断言 XPath、GBK POST、图片/文件规则通过。[逐站表与回归记录](aoaostar-mechanism-breadth-probe.md)。没有下载整书。
 
-再选 7 个具有正文下一页规则的站点：夜伴书屋的搜索行有两个链接，修正 URL 字段首匹配后，JVM/Android 均搜索 59、详情、目录 71、首条章节 3 页到正文；规则随后指回书籍页，现发 `PAGINATION_TO_CATALOG` 警告并停止。起舞中文明确停在尚未实现的 `java.post(...).header("Location")` 宿主；其余主要是证书、超时或域名出售页。[规则依据、逐站证据与命令](url-first-and-pagination-probe.md)。只取一章作规则验证，没有整书下载。
+再选 7 个具有正文下一页规则的站点：夜伴书屋的搜索行有两个链接，修正 URL 字段首匹配后，JVM/Android 均搜索 59、详情、目录 71、首条章节 3 页到正文；规则随后指回书籍页，现发 `PAGINATION_TO_CATALOG` 警告并停止。起舞中文当时明确停在尚未实现的 `java.post(...).header("Location")` 宿主；其余主要是证书、超时或域名出售页。[规则依据、逐站证据与命令](url-first-and-pagination-probe.md)。只取一章作规则验证，没有整书下载。
+
+后续按官方无自动跳转语义补了受控 `java.post` 与响应头读取。本地合成规则和实际 HTTP 302 均验证 POST 返回 `Location` 后才由搜索阶段 GET；起舞中文原始规则在 JVM/Android 均越过“方法不存在”，但 POST 与源站 TLS 握手被关闭，无法声称列表、目录或真实重定向通过。[源码依据、测试和真实边界](java-post-redirect-probe.md)。没有新增下载。

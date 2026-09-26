@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | 夜伴书屋 | JVM/Android 搜索 59、首条详情、目录 71；首条章节按 3 页读取，合并 HTML 原始 6071 字符、可见 4099 字符 | 两处可复现的规则兼容边界，见下文；单章长度不证明内容净化或整书正确 |
 | 小说路上 | 搜索请求证书已过期（2026-08-18） | 未到规则，不关闭证书验证 |
-| 起舞中文 | 搜索 URL 脚本调用 `java.post(...).header("Location")`，当前宿主无 `post` | 明确的 Java 宿主缺口，尚未发起站点请求 |
+| 起舞中文 | 首轮搜索 URL 脚本调用 `java.post(...).header("Location")` 时宿主无 `post` | 此为当时基线；[后续修复](java-post-redirect-probe.md)已补受控 POST 宿主，实站现在停在 TLS |
 | 神书网 | HTTP 200 的域名出售页，归 `PARKED_DOMAIN` | 未到规则 |
 | 笔趣阁③、CP 文库 | 搜索连接超时 | 未到规则 |
 | MM 小说网 | 搜索请求超时 | 未到规则 |
@@ -15,7 +15,7 @@
 
 该源 `ruleContent.nextContentUrl=.text-center@tag.a.2@href` 在首章第 3/3 页提取出书籍详情/目录页 `/book/1432/`。此前引擎继续抓这页，最终报 `Empty page content`，掩盖前 3 页已有正文。现在只有在下一页 URL **精确等于**已知书籍 URL 或目录 URL 时，停止本章分页并发出 `PAGINATION_TO_CATALOG / ruleContent.nextContentUrl` 警告；这是一条显式安全边界，不是声称与 Legado 对所有分页规则等价。官方 `BookContent.analyzeContent` 主要以已知下一章 URL 为边界，仍须继续验证其他网站的分页和末章行为。合成回归确保不请求书籍页，Android 日志显示该警告并只请求 3 个章节页。没有记录或提交正文文本。
 
-起舞中文的 `java.post` 在官方 `JsExtensions.kt` 返回 jsoup `Connection.Response`，该源读取 `Location`；官方请求明确 `followRedirects(false)`。当前 `FetchRequest`/通用 `Transport` 没有这种逐请求跳转策略，若只把 `post` 映射成现有自动跳转请求，可能丢失 `Location` 并产生伪兼容。因此本轮保留明确宿主错误，后续需同时设计响应对象和逐请求重定向控制，再用合成 302 回归与真实站点复测。
+起舞中文的 `java.post` 在官方 `JsExtensions.kt` 返回 jsoup `Connection.Response`，该源读取 `Location`；官方请求明确 `followRedirects(false)`。本轮初测时 `FetchRequest`/通用 `Transport` 尚无逐请求跳转策略；后续已补受控响应对象和跳转控制，并以合成 302 及真实站点复测，见[专项记录](java-post-redirect-probe.md)。真实站点仍被 TLS 阻断。
 
 复测命令：
 

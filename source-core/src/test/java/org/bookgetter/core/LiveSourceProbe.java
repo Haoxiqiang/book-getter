@@ -271,7 +271,14 @@ public final class LiveSourceProbe {
         if (request.headers().containsKey("User-Agent")) builder.setHeader("User-Agent", request.headers().get("User-Agent"));
         if (request.body() == null) builder.method(request.method(), HttpRequest.BodyPublishers.noBody());
         else builder.method(request.method(), HttpRequest.BodyPublishers.ofString(request.body(), StandardCharsets.UTF_8));
-        HttpResponse<byte[]> response = client.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray());
+        HttpClient requestClient = client;
+        if (!request.followRedirects()) {
+            HttpClient.Builder noRedirect = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER)
+                    .connectTimeout(Duration.ofSeconds(12));
+            client.cookieHandler().ifPresent(noRedirect::cookieHandler);
+            requestClient = noRedirect.build();
+        }
+        HttpResponse<byte[]> response = requestClient.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray());
         redirectRows(response).forEach(System.out::println);
         String contentType = response.headers().firstValue("Content-Type").orElse("");
         Matcher match = CHARSET.matcher(contentType);

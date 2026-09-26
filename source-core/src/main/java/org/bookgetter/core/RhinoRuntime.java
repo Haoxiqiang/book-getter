@@ -2,6 +2,7 @@ package org.bookgetter.core;
 
 import com.google.gson.Gson;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -128,6 +129,22 @@ public final class RhinoRuntime implements ScriptRuntime {
                     catch (Exception e) { throw Context.throwAsScriptRuntimeEx(e); }
                 }
             });
+            ScriptableObject.putProperty(java, "post", new BaseFunction() {
+                @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
+                    if (args.length < 2) throw Context.reportRuntimeError("java.post requires URL and body");
+                    if (args.length > 3) throw Context.reportRuntimeError("java.post timeout overload is unavailable");
+                    String url = Context.toString(args[0]);
+                    String body = Context.toString(args[1]);
+                    Map<String, String> headers = requestHeaders(args.length > 2 ? args[2] : null);
+                    if (headers.keySet().stream().noneMatch(name -> name.equalsIgnoreCase("Content-Type")))
+                        headers.put("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
+                    try {
+                        FetchResponse response = transport.fetch(new FetchRequest(url, "POST", headers,
+                                body, null, false, 0, false));
+                        return responseView(context, scope, response);
+                    } catch (Exception e) { throw Context.throwAsScriptRuntimeEx(e); }
+                }
+            });
             ScriptableObject.putProperty(java, "put", new BaseFunction() {
                 @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
                     String key = args.length > 0 ? Context.toString(args[0]) : "";
@@ -203,6 +220,47 @@ public final class RhinoRuntime implements ScriptRuntime {
                 return "";
             }
         };
+    }
+
+    private static Map<String, String> requestHeaders(Object input) {
+        Map<String, String> headers = new LinkedHashMap<>();
+        if (input == null || input == Undefined.instance) return headers;
+        if (input instanceof CharSequence text) {
+            com.google.gson.JsonObject object = com.google.gson.JsonParser.parseString(text.toString()).getAsJsonObject();
+            object.entrySet().forEach(entry -> headers.put(entry.getKey(), entry.getValue().getAsString()));
+            return headers;
+        }
+        if (input instanceof Scriptable object) {
+            for (Object id : object.getIds()) {
+                if (!(id instanceof String name)) throw Context.reportRuntimeError("java.post header names must be strings");
+                Object value = ScriptableObject.getProperty(object, name);
+                if (value == null || value == Undefined.instance)
+                    throw Context.reportRuntimeError("java.post header values cannot be null");
+                headers.put(name, Context.toString(value));
+            }
+            return headers;
+        }
+        throw Context.reportRuntimeError("java.post headers must be an object or JSON string");
+    }
+
+    private static Scriptable responseView(Context context, Scriptable scope, FetchResponse response) {
+        Scriptable view = context.newObject(scope);
+        ScriptableObject.putProperty(view, "header", new BaseFunction() {
+            @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
+                String name = args.length == 0 ? "" : Context.toString(args[0]);
+                return response.headers().entrySet().stream()
+                        .filter(entry -> entry.getKey().equalsIgnoreCase(name))
+                        .map(Map.Entry::getValue).findFirst().orElse(null);
+            }
+        });
+        ScriptableObject.putProperty(view, "body", stringMethod(response::body));
+        ScriptableObject.putProperty(view, "statusCode", new BaseFunction() {
+            @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
+                return response.status();
+            }
+        });
+        ScriptableObject.putProperty(view, "url", stringMethod(response::url));
+        return view;
     }
 
     private FetchRequest nestedRequest(String url, Map<String, Object> bindings, Source source) {

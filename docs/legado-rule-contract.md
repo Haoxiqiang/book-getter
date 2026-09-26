@@ -31,6 +31,8 @@
 
 [夜伴书屋探针](url-first-and-pagination-probe.md)进一步确认官方 `AnalyzeRule.getString(..., isUrl=true)` 对默认 DOM 规则调用 `AnalyzeByJSoup.getString0`：同一列表项有多个匹配链接时只取首个 URL，而非合并。分页规则若精确返回已知书籍/目录 URL，本工程作为安全扩展停止并告警 `PAGINATION_TO_CATALOG`；这与官方主要使用“下一章 URL”作边界的行为不能混同。
 
+[`java.post` 探针](java-post-redirect-probe.md)按官方 `JsExtensions.post` 的 `followRedirects(false)`、原始 body/头和响应 `header("Location")` 补受控子集。该返回值不能复用只给正文字符串的 `java.ajax`；普通书源请求继续按原策略跟跳转。真实起舞中文被 TLS 阻断，只有合成规则和本地 302 证明此子集，不能宣称官方完整 `Connection.Response` 宿主已实现。
+
 ## 可执行测试矩阵
 
 | 层级 | 样本/夹具 | 通过条件 | 当前状态 |

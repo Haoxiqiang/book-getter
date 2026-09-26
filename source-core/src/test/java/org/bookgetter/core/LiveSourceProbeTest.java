@@ -13,10 +13,13 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import java.util.zip.GZIPOutputStream;
-import org.junit.jupiter.api.Test;
+import org.bookgetter.core.Models.FetchRequest;
+import org.bookgetter.core.Models.FetchResponse;
 import org.bookgetter.core.Models.Kind;
 import org.bookgetter.core.Models.Source;
+import org.junit.jupiter.api.Test;
 
 final class LiveSourceProbeTest {
     @Test void sourceFilterSelectsSeveralDistinctSitesWithoutMatchingEverything() {
@@ -69,5 +72,37 @@ final class LiveSourceProbeTest {
             assertTrue(rows.get(0).contains("REDIRECT\tPOST\t301"));
             assertTrue(rows.get(1).contains("REDIRECT_FINAL\tGET\t200"));
         } finally { server.stop(0); }
+    }
+
+    @Test void postCanInspectLocationWithoutFollowingRedirect() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/form", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            exchange.getResponseHeaders().add("Location", "/results");
+            exchange.sendResponseHeaders(302, -1);
+            exchange.close();
+        });
+        server.createContext("/results", exchange -> {
+            byte[] body = "results".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+        try {
+            String base = "http://127.0.0.1:" + server.getAddress().getPort();
+            HttpClient client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build();
+            FetchResponse post = LiveSourceProbe.fetch(client,
+                    new FetchRequest(base + "/form", "POST", Map.of(), "searchkey=book", null,
+                            false, 0, false));
+            assertEquals(302, post.status());
+            assertEquals(base + "/form", post.url());
+            assertEquals("/results", post.headers().get("location"));
+            FetchResponse result = LiveSourceProbe.fetch(client, new FetchRequest(base + "/results"));
+            assertEquals(200, result.status());
+            assertEquals("results", result.body());
+        } finally {
+            server.stop(0);
+        }
     }
 }

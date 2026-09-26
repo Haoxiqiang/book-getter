@@ -644,6 +644,40 @@ final class SourceEngineTest {
         assertEquals("GET", request.method());
     }
 
+    @Test void javaPostExposesRedirectLocationWithoutFollowingIt() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","searchUrl":"<js>java.post('https://example.test/form','searchkey='+key,{referer:'https://example.test/',cookie:'sex=boy'}).header('Location')</js>",
+             "ruleSearch":{"bookList":"div.book","name":"a@text","bookUrl":"a@href"}}
+            """).sources().get(0);
+        List<FetchRequest> requests = new java.util.ArrayList<>();
+        Transport transport = request -> {
+            requests.add(request);
+            if (request.url().equals("https://example.test/form"))
+                return new FetchResponse(request.url(), "", 302, Map.of("location", "/results"));
+            return new FetchResponse(request.url(),
+                    "<div class='book'><a href='/book/1'>Book</a></div>", 200, Map.of());
+        };
+        RhinoRuntime runtime = new RhinoRuntime(transport);
+        SourceEngine engine = new SourceEngine(transport, runtime);
+        assertEquals("Book", engine.search(source, "故事", 1).get(0).name());
+        assertEquals(2, requests.size());
+        assertEquals("POST", requests.get(0).method());
+        assertFalse(requests.get(0).followRedirects());
+        assertEquals("searchkey=故事", requests.get(0).body());
+        assertEquals("sex=boy", requests.get(0).headers().get("cookie"));
+        assertEquals("application/x-www-form-urlencoded; charset=UTF-8",
+                requests.get(0).headers().get("Content-Type"));
+        assertEquals("https://example.test/results", requests.get(1).url());
+        assertTrue(requests.get(1).followRedirects());
+        assertEquals(302, runtime.evaluate(
+                "java.post('https://example.test/form','a=1','{\"referer\":\"https://example.test/\"}').statusCode()",
+                Map.of(), source));
+        assertEquals("undefined", runtime.evaluate(
+                "typeof java.post('https://example.test/form','a=1',{}).getClass", Map.of(), source));
+        assertThrows(RuntimeException.class, () -> runtime.evaluate(
+                "java.post('https://example.test/form','a=1',{},1000)", Map.of(), source));
+    }
+
     @Test void webViewDelayOptionSurvivesRequestPlanning() {
         Source source = SourceImporter.parse("""
             {"bookSourceUrl":"https://example.test","searchUrl":"/search,{\\\"webView\\\":true,\\\"webViewDelayTime\\\":2500}"}

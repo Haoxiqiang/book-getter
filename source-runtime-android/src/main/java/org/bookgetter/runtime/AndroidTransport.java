@@ -47,7 +47,9 @@ public final class AndroidTransport implements Transport {
                     ? RequestBody.create(MediaType.parse(contentType), new byte[0]) : null)
                 : RequestBody.create(MediaType.parse(contentType), input.body());
         builder.method(input.method(), body);
-        try (Response response = client.newCall(builder.build()).execute()) {
+        OkHttpClient requestClient = input.followRedirects() ? client
+                : client.newBuilder().followRedirects(false).followSslRedirects(false).build();
+        try (Response response = requestClient.newCall(builder.build()).execute()) {
             String finalUrl = response.request().url().toString();
             Charset charset = input.charset() != null ? Charset.forName(input.charset())
                     : response.body() != null && response.body().contentType() != null
