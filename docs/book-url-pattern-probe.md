@@ -22,3 +22,26 @@ Java 核心现在覆盖这两个分支，且直达解析不重复请求详情页
 ```
 
 下轮重点不是更多同类搜索，而是找到确实会从搜索 URL 跳到书籍详情的公开站点，或通过 Legado 原版与 Java 核心对同一响应做差分。记录最终 URL、是否命中模式、解析分支、字段输出和失败阶段；遇到登录/防护页先归环境，不修补原书源，也不抓整本正文。
+
+## 分支可观测性与第二批实站筛查
+
+同日给核心两种回退分别增加 `DIRECT_DETAIL_URL_PATTERN` 和 `DIRECT_DETAIL_EMPTY_LIST` 信息诊断；JVM 探针输出 `SEARCH_BRANCH`，Android Debug 输出同名标记，和真正的 `FIELD_WARNING` 分开。脱网测试断言命中模式、空列表回退及已设置模式但未命中的三种日志状态。这样普通 `OK` 不能再被误读为直达详情通过。
+
+从 128 源集合的 33 条非空模式中选六个不同站点，只搜“斗破苍穹”，不取目录或正文。整个运行**没有出现 `SEARCH_BRANCH`**，故没有实站直达正对照：
+
+| 站点 | 搜索阶段 | 判断 |
+| --- | --- | --- |
+| 有度中文网 | HTTP 200，普通列表 15 条 | 列表规则通过，未触发详情模式 |
+| 飞卢小说 | HTTP 200，普通列表 30 条 | 同上；不涉及付费正文 |
+| 恋听网 | HTTP 200，普通列表 17 条 | 同上；不涉及音频下载 |
+| 文学迷 | JVM 要求 Android WebView | 当前 JVM 环境未进入列表或详情规则 |
+| 三一小说 | HTTP 403 | 访问边界，未进入规则 |
+| 书本网 | HTTP 连接超时 | 网络边界，未进入规则 |
+
+```sh
+./gradlew :source-core:liveSourceProbe -PprobeJsonUrl=https://legado.aoaostar.com/sources/4dc410d1.json '-PprobeSource=www.yodu.org,www.juzixs.vip,www.31xs.com,b.faloo.com,ting55.com,www.ibookben.com' '-PprobeQueries=斗破苍穹' --offline
+```
+
+这批样本扩展了模式源的阶段证据，却尚未验证直达分支。后续应优先找已知会重定向到详情的搜索请求，避免反复用普通列表站点累加“成功数”。
+
+文学迷另在 Android 模拟器以同词复测：规则按要求启动 WebView，但搜索 URL 所在 `m.juzixs5.com` 返回 HTTP 403，停在 `SEARCH.searchUrl`，仍未进入模式或列表解析。命令：`adb shell am start -n org.bookgetter.app/.CompatibilityProbeActivity --es catalogUrl https://legado.aoaostar.com/sources/4dc410d1.json --es sourceFilter www.juzixs.vip --es keyword 斗破苍穹`。调试异常栈当前会带查询 URL，公开分享 logcat 前应脱敏；本文件不保存完整请求 URL 或页面内容。

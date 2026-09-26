@@ -1,5 +1,7 @@
 # 上游书源搜索实测（2026-09-26）
 
+2026-09-27 补记：对两个补充集合中十个非空 `bookUrlPattern` 源各只搜一个词。四站得到普通列表（52书库、有度、飞卢、恋听），其余停在 WebView 前提、TLS/证书、403、超时或可疑首页。JVM/Android 调试日志现可输出 `SEARCH_BRANCH`，但本次 JVM 实站没有触发；不以普通搜索成功证明该规则实站兼容，也没有下载章节。详见[专项记录](book-url-pattern-probe.md)。
+
 ## 范围与可复现性
 
 来源：[吉的书源集页面](https://source.jwyihao.top/)所列 9 个原始 JSON 文件。Raw、GitHub Proxy、jsDelivr 为同一文件的分发镜像，只取 Raw 一份；9 个文件展开为 11 条书源，按规范化 `bookSourceUrl` 去重后仍为 11 条，无重复项。本地快照 ID：`20260926-152117-ccb9324c`。原始 JSON、去重 JSON、SHA-256 索引保存在 `source-catalog/snapshots/<ID>/`，默认不纳入 Git；更新说明见[书源管理目录](../source-catalog/README.md)。

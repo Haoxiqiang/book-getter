@@ -24,13 +24,15 @@ final class SourceEngineTest {
              "ruleBookInfo":{"name":"h1@text","author":".author@text","intro":".intro@text"}}
             """).sources().get(0);
         int[] fetches = {0};
-        SourceEngine engine = new SourceEngine(request -> {
+        List<Diagnostic> diagnostics = new java.util.ArrayList<>();
+        Transport transport = request -> {
             fetches[0]++;
             return new FetchResponse("https://example.test/book/42", """
                 <h1>Direct Result</h1><span class='author'>Writer</span>
                 <p class='intro'>Summary</p>
                 """, 200, Map.of());
-        });
+        };
+        SourceEngine engine = new SourceEngine(transport, new RhinoRuntime(transport), diagnostics::add);
         List<BookHit> hits = engine.search(source, "title", 1);
         assertEquals(1, fetches[0]);
         assertEquals(1, hits.size());
@@ -38,6 +40,7 @@ final class SourceEngineTest {
         assertEquals("Direct Result", hits.get(0).name());
         assertEquals("Writer", hits.get(0).author());
         assertEquals("Summary", hits.get(0).intro());
+        assertEquals(List.of("DIRECT_DETAIL_URL_PATTERN"), diagnostics.stream().map(Diagnostic::code).toList());
     }
 
     @Test void emptySearchListFallsBackToDetailOnlyWhenPatternIsAbsent() {
@@ -51,10 +54,15 @@ final class SourceEngineTest {
         Source withPattern = SourceImporter.parse("{" +
                 "\"bookSourceUrl\":\"https://example.test\",\"bookUrlPattern\":\"/never\"," + rules + "}")
                 .sources().get(0);
-        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
-                "<h1>Fallback</h1><span class='author'>Writer</span>", 200, Map.of()));
+        List<Diagnostic> diagnostics = new java.util.ArrayList<>();
+        Transport transport = request -> new FetchResponse(request.url(),
+                "<h1>Fallback</h1><span class='author'>Writer</span>", 200, Map.of());
+        SourceEngine engine = new SourceEngine(transport, new RhinoRuntime(transport), diagnostics::add);
         assertEquals("Fallback", engine.search(withoutPattern, "title", 1).get(0).name());
+        assertEquals(List.of("DIRECT_DETAIL_EMPTY_LIST"), diagnostics.stream().map(Diagnostic::code).toList());
+        diagnostics.clear();
         assertTrue(engine.search(withPattern, "title", 1).isEmpty());
+        assertTrue(diagnostics.isEmpty());
     }
 
     @Test void invalidBookUrlPatternReportsItsOwnField() {

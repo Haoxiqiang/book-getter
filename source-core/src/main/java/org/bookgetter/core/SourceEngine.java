@@ -46,16 +46,24 @@ public final class SourceEngine {
             String bookUrlPattern = source.string("bookUrlPattern");
             if (bookUrlPattern != null && !bookUrlPattern.isEmpty()) {
                 try {
-                    if (Pattern.compile(bookUrlPattern).matcher(response.url()).matches())
+                    if (Pattern.compile(bookUrlPattern).matcher(response.url()).matches()) {
+                        diagnostics.accept(new Diagnostic(Stage.SEARCH, "DIRECT_DETAIL_URL_PATTERN",
+                                "Final search URL matches bookUrlPattern; parsing detail rules",
+                                Severity.INFO, "bookUrlPattern"));
                         return directDetailSearch(source, response);
+                    }
                 } catch (PatternSyntaxException e) {
                     throw new SourceFailure(Stage.SEARCH, source.id(), "bookUrlPattern", e.getMessage(), e);
                 }
             }
             String listRule = source.rule("ruleSearch", "bookList");
             List<Object> items = rules.many(listRule, response.body(), response.url(), source);
-            if (items.isEmpty() && (bookUrlPattern == null || bookUrlPattern.isEmpty()))
+            if (items.isEmpty() && (bookUrlPattern == null || bookUrlPattern.isEmpty())) {
+                diagnostics.accept(new Diagnostic(Stage.SEARCH, "DIRECT_DETAIL_EMPTY_LIST",
+                        "Search list is empty and no bookUrlPattern is set; trying detail rules",
+                        Severity.INFO, "ruleSearch.bookList"));
                 return directDetailSearch(source, response);
+            }
             List<BookHit> hits = new ArrayList<>();
             for (Object item : items) {
                 rules.enterSearchItem();

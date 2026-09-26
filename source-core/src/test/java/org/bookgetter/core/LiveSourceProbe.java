@@ -128,18 +128,22 @@ public final class LiveSourceProbe {
                 .forEach(source -> unique.putIfAbsent(source.id(), source));
         System.out.println("INVENTORY\tsnapshot=" + snapshot + "\tuniqueSources=" + unique.size());
         System.out.println("source\tkeyword\tstatus\thits\tfirstTitle\tdetail");
-        List<Diagnostic> fieldWarnings = new ArrayList<>();
-        SourceEngine engine = new SourceEngine(transport, new RhinoRuntime(transport), fieldWarnings::add);
+        List<Diagnostic> diagnostics = new ArrayList<>();
+        SourceEngine engine = new SourceEngine(transport, new RhinoRuntime(transport), diagnostics::add);
         for (Source source : unique.values()) {
             if (!matchesSource(source, sourceFilter)) continue;
             for (String keyword : queries) {
                 try {
-                    fieldWarnings.clear();
+                    diagnostics.clear();
                     int qualityStart = responseQualities.size();
                     List<BookHit> hits = directBookUrl == null ? engine.search(source, keyword, 1)
                             : List.of(new BookHit(source.id(), directBookUrl, directBookUrl,
                                     "", "", "", source.kind()));
-                    fieldWarnings.stream().map(Diagnostic::field).distinct().forEach(field ->
+                    diagnostics.stream().filter(diagnostic -> diagnostic.severity() == org.bookgetter.core.Models.Severity.INFO)
+                            .map(Diagnostic::code).distinct().forEach(code ->
+                            System.out.println(row(source.name(), keyword, "SEARCH_BRANCH", "", "", code)));
+                    diagnostics.stream().filter(diagnostic -> diagnostic.severity() != org.bookgetter.core.Models.Severity.INFO)
+                            .map(Diagnostic::field).distinct().forEach(field ->
                             System.out.println(row(source.name(), keyword, "FIELD_WARNING", "", "", field)));
                     String first = hits.isEmpty() ? "" : hits.get(0).name();
                     boolean suspectSearch = responseQualities.subList(qualityStart, responseQualities.size()).stream()
@@ -151,9 +155,10 @@ public final class LiveSourceProbe {
                     if (captureFirst && !hits.isEmpty()) {
                         try {
                             int detailQualityStart = responseQualities.size();
-                            fieldWarnings.clear();
+                            diagnostics.clear();
                             BookDetail detail = engine.detail(source, hits.get(0));
-                            fieldWarnings.stream().map(Diagnostic::field).distinct().forEach(field ->
+                            diagnostics.stream().filter(diagnostic -> diagnostic.severity() != org.bookgetter.core.Models.Severity.INFO)
+                                    .map(Diagnostic::field).distinct().forEach(field ->
                                     System.out.println(row(source.name(), keyword, "FIELD_WARNING", "", "", field)));
                             boolean suspect = responseQualities.subList(detailQualityStart, responseQualities.size()).stream()
                                     .anyMatch(value -> value.equals("BUSINESS_ERROR") || value.equals("CHALLENGE_PAGE")
@@ -186,7 +191,7 @@ public final class LiveSourceProbe {
                                 int contentQualityStart = responseQualities.size();
                                 var content = engine.content(source, detail, firstChapter,
                                         SourceEngine.nextReadableUrl(chapters, firstChapter));
-                                fieldWarnings.stream().filter(warning -> warning.stage() == org.bookgetter.core.Models.Stage.CONTENT)
+                                diagnostics.stream().filter(warning -> warning.stage() == org.bookgetter.core.Models.Stage.CONTENT)
                                         .map(warning -> warning.code() + " " + warning.field()).distinct()
                                         .forEach(warning -> System.out.println(row(source.name(), keyword,
                                                 "CONTENT_WARNING", "", "", warning)));

@@ -77,7 +77,9 @@ public final class CompatibilityProbeActivity extends Activity {
                 java.util.Set<String> warnedFields = new java.util.HashSet<>();
                 SourceEngine engine = new SourceEngine(observed, new RhinoRuntime(observed), diagnostic -> {
                     String warning = diagnostic.code() + " " + diagnostic.field();
-                    if (warnedFields.add(warning))
+                    if (diagnostic.severity() == org.bookgetter.core.Models.Severity.INFO)
+                        Log.i(TAG, clean("SEARCH_BRANCH " + diagnostic.code()));
+                    else if (warnedFields.add(warning))
                         Log.w(TAG, clean("FIELD_WARNING " + warning));
                 });
                 Log.i(TAG, clean("START " + source.name() + " " + source.id() + " key=" + keyword));
