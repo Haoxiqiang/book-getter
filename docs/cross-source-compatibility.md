@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | 哔哩轻小说🏷 | JS 对空正则结果取 `[1]` | 搜索前置脚本依赖站点 guard 接口；单独只读检查曾得 HTTP 403。先在有授权的浏览器/登录环境确认响应，再判断规则宿主差异 |
 | 哔哩轻小说•台 | JVM 需要 WebView；Android 搜索为 0 | 模拟器 WebView 对“无职转生”拿到 HTTP 200、标题 `Programmable Search Engine`，默认延时约 1 秒时 HTML 61,963 字符，额外延时 5 秒时 62,093 字符，均解析 0 条。单纯延长等待未解决；需检查 CSE 结果容器/站内索引与脚本加载状态，不能标为搜索兼容。该源的 `bookList` 还需 `java.setContent/getString` 宿主，命中时才能验证 |
-| 轻之文库轻小说 | TLS 握手由远端终止 | 本环境网络失败；需换正常授权网络复测，不能推断规则语法 |
+| 轻之文库轻小说 | JVM TLS 握手由远端终止；Android 连接被关闭 | 两种环境均在请求阶段失败，尚未进入该源复杂 `java.getElement`/AES 防护规则；需换正常授权网络复测，不能推断规则语法 |
 | 三七轻小说 | `java.getElement` 未提供 | 脚本宿主/DOM 元素对象模型缺口；源还有 `getString`、缓存文件、AES 与 Cookie 依赖，不能只补一个空壳方法 |
 | 轻小说文库 | 修复 URL 选项后，暴露 `cookie` 未定义 | 之前的 `MalformedJsonException` 是请求尾部 `@js:` 被误当 JSON；已补语法单测。下一步是共享 Cookie 宿主及登录/GBK 编码验证；站点曾跳转后 HTTP 403 |
 | lk轻之国度 | `cookie.getKey` 缺失 | 搜索请求需用户 token 中的 `security_key`；未登录不能声称规则错误或零结果 |
@@ -51,6 +51,7 @@ Android 调试包内提供 `CompatibilityProbeActivity`，可通过 `adb shell a
 | --- | --- | --- | --- |
 | 哔哩轻小说•台 / 无职转生 | WebView 200；默认约 1 秒 HTML 61,963 字符，额外 5 秒 62,093 字符，Google CSE 标题 | 两次搜索均 0 | 延时并未产生规则匹配结果；尚未验证列表宿主或确认 CSE 是否索引该词 |
 | ESJ Zone / 無職轉生 | 请求超时 | 停在搜索请求 | 网络/站点可达性待复测 |
+| 轻之文库轻小说 / 无职转生 | Android `connection closed`，JVM 曾在 TLS 握手失败 | 停在搜索请求 | 两端均未进入复杂 JS 列表规则，不能算规则失败或空结果 |
 | 轻小说机翻🤖 / 无职转生 | API 各阶段均 200 | 搜索 20、详情、目录 23、首章 7,945 字符 | Android 上 JSON/JS 路径的正对照；不据此推断其他书源 |
 | rezero / RE0 | 搜索经百度跳转，正文在站点自身，均 200 | 搜索 1、详情、目录 887、首章 1,979 字符 | Android 上跨域请求/静态 HTML 路径的正对照 |
 
