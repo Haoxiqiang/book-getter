@@ -27,6 +27,7 @@
 8. 详情页的分类、字数、最新章、简介、封面也是可选字段；异常不能遮蔽有效目录地址，且应留下字段告警。书名、作者、目录地址仍是失败可见字段。官方依据为 `BookInfo.kt` 的逐字段 `try/catch`；[速读谷四页目录探针](sudugu-paged-catalog-probe.md)提供真实站点与 Android/JVM 对照，但显式跳过了搜索、未抓正文。
 9. JS 规则接在 DOM 列表之后时，`result` 必须保留节点语义，不能一律降成外层 HTML 字符串。受控宿主只暴露已验证的方法，不开放真实 Java 类；[rezero 卷规则探针](dom-node-js-probe.md)以 `result.attr('href')` 在 Android/JVM 均核对 23 个卷标题和 887 个普通章节。节点 `select/hasClass` 已由经致文学目录正对照，其他列表对象和混合链仍需另测。
 10. 书源 ID 可以在 URL 的 `#` 片段中附加中文或带空格的区别标签，仍可作为相对搜索路径的基础；按官方 `NetworkUtils.getAbsoluteURL` 的 URL 解析语义验证，不能让严格 URI 校验把请求留下为无协议路径。搜索和目录列表规则的开头 `+` 是入口控制前缀、`-` 表示倒序，须在解析规则前处理；SF 轻小说的 `+@js:` 目录与[两类前缀回归及跨站记录](source-id-fragment-and-list-prefix-probe.md)是正对照，其他列表模式仍需分别验证。
+11. 对脚本中的 `importClass(org.jsoup.Jsoup)` 只按已观察到的 `Jsoup.parse(String)` 和安全 DOM 视图实现白名单；不能为追求兼容开放任意 Java 包或反射。SF 轻小说的[真实搜索字段与 Android/JVM 对照](jsoup-safe-facade-probe.md)验证了分类和最新章恢复，但完整 JavaImporter 与其他 Jsoup 方法仍未实现。
 
 补充的[混合 JS/JSONPath 探针](mixed-js-jsonpath-probe.md)纠正了先前对 `{$.字段}` 的误读：官方 `AnalyzeByJSonPath.getString` 支持内嵌取值，`AnalyzeRule.splitSourceRule` 允许 `<js>...</js>` 后继续 JSONPath。JSON Map 上的 `href/text` 动作若不存在，必须返回空以允许 `||` 回退，不能把整张 Map 字符串化为有效 URL；但 JS 显式 `String(result)` 又可能依赖官方 Map 的字符串视图。两者要区分，且不开放 Java 反射。含 `,{URL选项}` 的相对章节链接只解析路径部分，保留选项供请求规划使用。
 

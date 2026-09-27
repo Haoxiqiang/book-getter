@@ -66,6 +66,7 @@ public final class RhinoRuntime implements ScriptRuntime {
             ScriptableObject scope = cx.initSafeStandardObjects();
             Scriptable java = cx.newObject(scope);
             IdentityHashMap<Scriptable, Object> nativeViews = new IdentityHashMap<>();
+            installJsoupFacade(cx, scope, nativeViews);
             BaseFunction notify = new BaseFunction() {
                 @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
                     notification.accept(args.length == 0 ? "null" : Context.toString(args[0]));
@@ -258,6 +259,30 @@ public final class RhinoRuntime implements ScriptRuntime {
             Object json = cx.evaluateString(scope, "JSON.stringify(__bookGetterResult)", "result", 1, null);
             return json == Undefined.instance ? null : Context.toString(json);
         } finally { Context.exit(); }
+    }
+
+    private static void installJsoupFacade(Context context, ScriptableObject scope,
+                                            IdentityHashMap<Scriptable, Object> nativeViews) {
+        Scriptable jsoup = context.newObject(scope);
+        ScriptableObject.putProperty(jsoup, "parse", new BaseFunction() {
+            @Override public Object call(Context cx, Scriptable callScope, Scriptable thisObj, Object[] args) {
+                String html = args.length == 0 ? "" : Context.toString(args[0]);
+                return elementView(cx, callScope, org.jsoup.Jsoup.parse(html), nativeViews);
+            }
+        });
+        Scriptable jsoupNamespace = context.newObject(scope);
+        ScriptableObject.putProperty(jsoupNamespace, "Jsoup", jsoup);
+        Scriptable orgNamespace = context.newObject(scope);
+        ScriptableObject.putProperty(orgNamespace, "jsoup", jsoupNamespace);
+        ScriptableObject.putProperty(scope, "org", orgNamespace);
+        ScriptableObject.putProperty(scope, "importClass", new BaseFunction() {
+            @Override public Object call(Context cx, Scriptable callScope, Scriptable thisObj, Object[] args) {
+                if (args.length != 1 || args[0] != jsoup)
+                    throw Context.reportRuntimeError("Only the safe org.jsoup.Jsoup facade can be imported");
+                ScriptableObject.putProperty(scope, "Jsoup", jsoup);
+                return Undefined.instance;
+            }
+        });
     }
 
     private static BaseFunction emptyStringFunction() {

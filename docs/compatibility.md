@@ -45,3 +45,5 @@
 [选择器→JS→选择器专项](selector-js-selector-probe.md)补了列表规则的跨行分段执行及受控 `java.getElements(...).toArray()`；“文学吧”从 CSS 解析错误、再到缺少 `toArray`，最后以“故事”返回 13 条候选。仅验证搜索列表路径，候选相关性和下游阶段未验；其他混合模式仍不能据此宣称兼容。
 
 [书源 ID 片段与列表前缀专项](source-id-fragment-and-list-prefix-probe.md)按官方 URL 相对解析和列表入口处理修正了两类独立差异：带空格/中文 `#` 标签的书源 ID 不再使相对搜索路径丢失协议，`+` 列表前缀不再送入 CSS，`-` 列表前缀按官方倒序。八一中文在修正后仍于请求阶段 EOF，笔趣阁③为 403；SF 轻小说真实搜索 2、详情通过、目录 2023，与公开 HTML 独立链接计数相同。只到目录，不计正文或整书。
+
+[Jsoup 安全视图专项](jsoup-safe-facade-probe.md)为规则中的 `importClass(org.jsoup.Jsoup)` 提供仅限 `parse` 的白名单，不开放 Java 类反射。SF 轻小说原先 `kind` 字段告警、分类/最新章为空；现 JVM 与 Android 均在真实规则下搜索 2、分类/最新章非空、详情与 2023 目录保持通过。其他三个候选站点停在 TLS、403 或 WebView 前提，尚无第二站的同类脚本正对照；完整 JavaImporter/Jsoup API 仍不兼容。

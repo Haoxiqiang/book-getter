@@ -19,6 +19,43 @@ final class SourceEngineTest {
         assertEquals("POST", request.method());
     }
 
+    @Test void whitelistedJsoupImportCanParseDomWithoutJavaReflection() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test"}
+            """).sources().get(0);
+        RhinoRuntime runtime = new RhinoRuntime(request ->
+                new FetchResponse(request.url(), "", 200, Map.of()));
+        assertEquals("Story", runtime.evaluate("""
+                importClass(org.jsoup.Jsoup);
+                var doc=Jsoup.parse('<div class="introduce">Story</div>');
+                doc.select('.introduce').text();
+                """, Map.of(), source));
+        assertEquals("undefined", runtime.evaluate("""
+                importClass(org.jsoup.Jsoup);
+                typeof Jsoup.parse('<p>x</p>').getClass;
+                """, Map.of(), source));
+        assertThrows(Exception.class, () -> runtime.evaluate("importClass({});", Map.of(), source));
+    }
+
+    @Test void safeJsoupImportSupportsSearchMetadataEnrichment() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","searchUrl":"/api?q={{key}}",
+             "ruleSearch":{"bookList":"$.Novels[*]","name":"$.NovelName",
+               "bookUrl":"/i/{$.NovelID}/",
+               "kind":"https://example.test/Novel/{$.NovelID}/@js:importClass(org.jsoup.Jsoup); var doc=Jsoup.parse(java.ajax(result)); java.put('last',doc.select('.chapter-title a').text()); doc.select('.text-row').text()",
+               "lastChapter":"@js:java.get('last')"}}
+            """).sources().get(0);
+        Transport transport = request -> new FetchResponse(request.url(),
+                request.url().contains("/Novel/")
+                        ? "<p class='text-row'>Fantasy</p><div class='chapter-title'><a>Chapter 9</a></div>"
+                        : "{\"Novels\":[{\"NovelID\":7,\"NovelName\":\"Story\"}]}",
+                200, Map.of());
+        List<BookHit> hits = new SourceEngine(transport).search(source, "Story", 1);
+        assertEquals(1, hits.size());
+        assertEquals("Fantasy", hits.get(0).genre());
+        assertEquals("Chapter 9", hits.get(0).lastChapter());
+    }
+
     @Test void listPrefixesAreHandledBeforeRuleEvaluation() {
         Source source = SourceImporter.parse("""
             {"bookSourceUrl":"https://example.test","searchUrl":"/search",

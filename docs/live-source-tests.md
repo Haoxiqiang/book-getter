@@ -4,6 +4,8 @@
 
 同日[书源 ID/列表前缀探针](source-id-fragment-and-list-prefix-probe.md)：八一中文的带空格 `#` 标签 ID 曾使相对 POST URL 规划失败；改按官方 URL 回退后进入真实请求，但源站 EOF。笔趣阁③正确请求路径被 403 阻断。SF 轻小说的中文标签 ID 搜索“魔王”2 条、首条详情通过；再修复 `+@js:` 目录前缀后得到 2023 条目录，与公开页面的不同章节链接数一致。未取正文或整书。
 
+同日[Jsoup 安全视图探针](jsoup-safe-facade-probe.md)：SF 轻小说 `kind` 的 `importClass(org.jsoup.Jsoup)` 曾被受限宿主拒绝，原搜索 2 条但分类与最新章为空。补仅限 `Jsoup.parse` 的安全 DOM 视图后，JVM/Android 均搜索 2、分类与最新章非空、详情和 2023 条目录保持通过。啃书小说网、木兰花漫、就去看网分别被 TLS、403、WebView 前提挡住，均不能算第二站同类规则通过；无下载。
+
 2026-09-27 补记：对两个补充集合中十个非空 `bookUrlPattern` 源各只搜一个词。四站得到普通列表（52书库、有度、飞卢、恋听），其余停在 WebView 前提、TLS/证书、403、超时或可疑首页。JVM/Android 调试日志现可输出 `SEARCH_BRANCH`，但本次 JVM 实站没有触发；不以普通搜索成功证明该规则实站兼容，也没有下载章节。详见[专项记录](book-url-pattern-probe.md)。
 
 同日[JS 宿主预检审计](js-host-preflight-audit.md)修正已提供方法被误报为未实现、`jsLib` 漏扫及字段定位不足；四个缺失方法候选源低频探针分别受 TLS 或旧域 404 阻断，均未到达对应脚本分支，不把静态缺口写成实站执行失败。
