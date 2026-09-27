@@ -7,6 +7,102 @@ import org.bookgetter.core.Models.*;
 import org.junit.jupiter.api.Test;
 
 final class SourceEngineTest {
+    @Test void crossSourceOperationsReportTheirOwnStageBeforeFetching() {
+        Source source = SourceImporter.parse("{\"bookSourceUrl\":\"https://one.test\"}").sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> fail("Mismatched source must not issue a request"));
+        BookHit foreign = new BookHit("https://other.test", "https://other.test/book", "Book", "", "", "", Kind.TEXT);
+        BookDetail book = new BookDetail(foreign, foreign.url(), List.of());
+        Chapter chapter = new Chapter(foreign.url(), "https://other.test/chapter", "Chapter", 0, false, false);
+        assertEquals(Stage.DETAIL, assertThrows(SourceFailure.class, () -> engine.detail(source, foreign)).stage);
+        assertEquals(Stage.CATALOG, assertThrows(SourceFailure.class, () -> engine.chapters(source, book)).stage);
+        SourceFailure content = assertThrows(SourceFailure.class, () -> engine.content(source, book, chapter));
+        assertEquals(Stage.CONTENT, content.stage);
+        assertEquals("SOURCE_MISMATCH", content.code);
+    }
+
+    @Test void ordinaryRulesReceiveTheCurrentBookAtDetailCatalogAndContent() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://source.test",
+             "ruleBookInfo":{"init":"@js:JSON.stringify({name:'Detail',url:book.bookUrl})",
+               "name":"$.name","tocUrl":"$.url"},
+             "ruleToc":{"chapterList":"@js:book.name",
+               "chapterName":"text","chapterUrl":"@js:'/chapter'"},
+             "ruleContent":{"content":"@js:book.name + ':' + result"}}
+            """).sources().get(0);
+        Transport transport = request -> new FetchResponse(request.url(), "Body", 200, Map.of());
+        RhinoRuntime runtime = new RhinoRuntime(transport);
+        SourceEngine engine = new SourceEngine(transport, runtime);
+        BookHit hit = new BookHit(source.id(), "https://source.test/book", "Search", "", "", "", Kind.TEXT);
+        BookDetail detail = engine.detail(source, hit);
+        assertEquals(hit.url(), detail.tocUrl());
+        assertEquals("Detail", detail.hit().name());
+        runtime.enterBook(Map.of("name", "Detail"));
+        assertEquals("Detail", runtime.evaluate("book.name", Map.of(), source));
+        runtime.leaveBook();
+        List<Chapter> chapters = engine.chapters(source, detail);
+        assertEquals("Detail", chapters.get(0).title());
+        assertEquals("Detail:Body", engine.content(source, detail, chapters.get(0)).text());
+        BookHit another = new BookHit(source.id(), "https://source.test/another", "Other", "", "", "", Kind.TEXT);
+        assertEquals(another.url(), engine.detail(source, another).tocUrl());
+    }
+
+    @Test void bookHostVariablesAndReverseTocSurviveFromDetailIntoCatalog() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"搜索代理","searchUrl":"https://example.test/search?q={{key}}",
+             "ruleSearch":{"bookList":"a.book","name":"a@text","bookUrl":"a@href"},
+             "ruleBookInfo":{"name":"@js:book.putVariable('token','saved'); book.setReverseToc(true); 'Detail'",
+               "tocUrl":"@js:'/toc'"},
+             "ruleToc":{"chapterList":"a.chapter","chapterName":"a@text","chapterUrl":"a@href"}}
+            """).sources().get(0);
+        Transport transport = request -> new FetchResponse(request.url(),
+                request.url().contains("/search") ? "<a class='book' href='/book'>Book</a>"
+                : request.url().endsWith("/toc") ? "<a class='chapter' href='/one'>One</a><a class='chapter' href='/two'>Two</a>"
+                : "<h1>Detail</h1>", 200, Map.of());
+        SourceEngine engine = new SourceEngine(transport);
+        BookHit hit = engine.search(source, "query", 1).get(0);
+        BookDetail detail = engine.detail(source, hit);
+        assertEquals("saved", detail.hit().variables().get("token"));
+        assertEquals("true", detail.hit().variables().get("__bookgetter.reverseToc"));
+        List<Chapter> chapters = engine.chapters(source, detail);
+        assertEquals(List.of("Two", "One"), chapters.stream().map(Chapter::title).toList());
+        assertEquals(List.of(0, 1), chapters.stream().map(Chapter::index).toList());
+    }
+
+    @Test void bookRuleVariablesDoNotCrossSourcesWithTheSameBookUrl() {
+        Source first = SourceImporter.parse("""
+            {"bookSourceUrl":"https://first.test","ruleBookInfo":{
+              "name":"$.name@put:{token:$.token}","tocUrl":"/toc"}}
+            """).sources().get(0);
+        Source second = SourceImporter.parse("""
+            {"bookSourceUrl":"https://second.test","ruleBookInfo":{
+              "name":"$.name","intro":"@get:{token}","tocUrl":"/toc"}}
+            """).sources().get(0);
+        String sharedUrl = "https://shared.test/book";
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
+                "{\"name\":\"Book\",\"token\":\"first-source-secret\"}", 200, Map.of()));
+        BookDetail fromFirst = engine.detail(first,
+                new BookHit(first.id(), sharedUrl, "Book", "", "", "", Kind.TEXT));
+        assertEquals("first-source-secret", fromFirst.hit().variables().get("token"));
+        BookDetail fromSecond = engine.detail(second,
+                new BookHit(second.id(), sharedUrl, "Book", "", "", "", Kind.TEXT));
+        assertEquals("", fromSecond.hit().intro());
+        assertFalse(fromSecond.hit().variables().containsKey("token"));
+    }
+
+    @Test void contentRejectsChapterFromAnotherBookBeforeFetching() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://source.test","ruleContent":{"content":"p@text"}}
+            """).sources().get(0);
+        BookHit hit = new BookHit(source.id(), "https://source.test/book-one", "One", "", "", "", Kind.TEXT);
+        BookDetail book = new BookDetail(hit, hit.url(), List.of());
+        Chapter wrong = new Chapter("https://source.test/book-two", "https://source.test/chapter", "Chapter", 0, false, false);
+        SourceEngine engine = new SourceEngine(request -> { throw new AssertionError("Wrong chapter was fetched"); });
+        SourceFailure failure = assertThrows(SourceFailure.class,
+                () -> engine.content(source, book, wrong, null));
+        assertEquals("CHAPTER_BOOK_MISMATCH", failure.code);
+        assertEquals("chapter.bookUrl", failure.field);
+    }
+
     @Test void relativeSearchUrlResolvesAgainstSourceIdWithFragmentLabel() {
         Source source = SourceImporter.parse("""
             {"bookSourceUrl":"http://example.test#grid tr!0#label",
@@ -592,6 +688,22 @@ final class SourceEngineTest {
                 imageEngine.content(image, imageBook, imageChapter).resources().get(0).url());
     }
 
+    @Test void comicLazyImagesUseDownloadableDataUrlsInsteadOfBlobAndPlaceholderSrc() {
+        Source image = SourceImporter.parse("""
+            {"bookSourceUrl":"https://comic.example.test","bookSourceType":2,
+             "ruleContent":{"content":"div.pages@html"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
+                "<div class='pages'><img src='blob:https://comic.example.test/random' "
+                        + "data-src='https://images.example.test/one.webp'>"
+                        + "<img src='/loading.gif' data-original='/two.webp'></div>", 200, Map.of()));
+        BookHit hit = new BookHit(image.id(), "https://comic.example.test/book", "Comic", "", "", "", Kind.IMAGE);
+        Chapter chapter = new Chapter(hit.url(), "https://comic.example.test/one", "One", 0, false, false);
+        assertEquals(List.of("https://images.example.test/one.webp", "https://comic.example.test/two.webp"),
+                engine.content(image, new BookDetail(hit, hit.url(), List.of()), chapter).resources().stream()
+                        .map(Resource::url).toList());
+    }
+
     @Test void contentPaginationStopsAtKnownNextChapter() {
         Source source = SourceImporter.parse("""
             {"bookSourceUrl":"https://example.test","ruleContent":{
@@ -1074,6 +1186,8 @@ final class SourceEngineTest {
         assertEquals("%E4%B8%AD%E6%96%87+%E7%A9%BA%E6%A0%BC",
                 runtime.evaluate("java.encodeURI('中文 空格')", Map.of(), source));
         assertEquals("", runtime.evaluate("java.encodeURI('abc','invalid-charset')", Map.of(), source));
+        assertEquals("汉语转换", runtime.evaluate("java.t2s('漢語轉換')", Map.of(), source));
+        assertEquals("雪梨", runtime.evaluate("java.t2s('雪梨')", Map.of(), source));
         assertTrue(SourceImporter.preflight(source).stream().noneMatch(item ->
                 item.code().equals("UNSUPPORTED_JS_HOST")));
         assertTrue(SourceImporter.preflight(source).stream().anyMatch(item ->
@@ -1213,6 +1327,60 @@ final class SourceEngineTest {
             assertTrue(result.errors().containsKey(bad.id()));
             assertEquals(good.id(), result.hits().get(0).sourceId());
         } finally { pool.shutdownNow(); }
+    }
+
+    @Test void cancellingSearchInterruptsItsChildRequest() throws Exception {
+        Source source = SourceImporter.parse(sourceJson).sources().get(0);
+        java.util.concurrent.CountDownLatch started = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch interrupted = new java.util.concurrent.CountDownLatch(1);
+        Transport transport = request -> {
+            started.countDown();
+            try { new java.util.concurrent.CountDownLatch(1).await(); }
+            catch (InterruptedException e) { interrupted.countDown(); throw e; }
+            throw new AssertionError();
+        };
+        java.util.concurrent.ExecutorService children = java.util.concurrent.Executors.newSingleThreadExecutor();
+        java.util.concurrent.atomic.AtomicReference<Throwable> outcome = new java.util.concurrent.atomic.AtomicReference<>();
+        Thread coordinator = new Thread(() -> {
+            try { new SearchCoordinator(new SourceEngine(transport), children).search(List.of(source), "book", 1); }
+            catch (Throwable error) { outcome.set(error); }
+        });
+        try {
+            coordinator.start();
+            assertTrue(started.await(2, java.util.concurrent.TimeUnit.SECONDS));
+            coordinator.interrupt();
+            coordinator.join(2000);
+            assertFalse(coordinator.isAlive());
+            assertTrue(outcome.get() instanceof java.util.concurrent.CancellationException);
+            assertTrue(interrupted.await(2, java.util.concurrent.TimeUnit.SECONDS));
+        } finally {
+            coordinator.interrupt();
+            children.shutdownNow();
+        }
+    }
+
+    @Test void interruptedRuleScriptStopsInsteadOfOccupyingAWorkerForever() throws Exception {
+        java.util.concurrent.CountDownLatch started = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch finished = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicReference<Throwable> failure = new java.util.concurrent.atomic.AtomicReference<>();
+        RhinoRuntime runtime = new RhinoRuntime(request -> new FetchResponse(request.url(), "", 200, Map.of()),
+                message -> started.countDown());
+        Thread worker = new Thread(() -> {
+            try { runtime.evaluate("java.toast('started'); while (true) {}", Map.of(), null); }
+            catch (Throwable error) { failure.set(error); }
+            finally { finished.countDown(); }
+        });
+        worker.setDaemon(true);
+        worker.start();
+        try {
+            assertTrue(started.await(2, java.util.concurrent.TimeUnit.SECONDS));
+            worker.interrupt();
+            assertTrue(finished.await(2, java.util.concurrent.TimeUnit.SECONDS));
+            assertNotNull(failure.get());
+        } finally {
+            worker.interrupt();
+            worker.join(2000);
+        }
     }
 
     @Test void xpathAndRegexRulesHandleHtmlFixture() {
@@ -1458,5 +1626,258 @@ final class SourceEngineTest {
         assertEquals("/next.html", evaluator.one("##url_next:'([^']*)'##$1###",
                 "url_next:'/next.html'; url_next:'/later.html'", source.id(), source, false));
         assertEquals("", evaluator.one("##missing:(\\d+)##$1###", "no link", source.id(), source, false));
+    }
+
+    @Test void discoveryCategoriesAndPagesUseExploreRules() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","exploreUrl":"Latest::/latest?page={{page}}&&Popular::/popular?page={{page}}",
+             "ruleExplore":{"bookList":"li.book","name":"a@text","bookUrl":"a@href"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
+                "<li class='book'><a href='/book/2'>Second</a></li>", 200, Map.of()));
+        List<ExploreEntry> entries = engine.exploreEntries(source);
+        assertEquals(List.of("Latest", "Popular"), entries.stream().map(ExploreEntry::title).toList());
+        List<BookHit> hits = engine.explore(source, entries.get(0), 2);
+        assertEquals("Second", hits.get(0).name());
+        assertEquals("https://example.test/book/2", hits.get(0).url());
+    }
+
+    @Test void catalogAndContentRejectLoginResponsesBeforeEvaluatingRules() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","ruleToc":{"chapterList":"li.chapter"},
+             "ruleContent":{"content":"p.body@text"}}
+            """).sources().get(0);
+        BookHit hit = new BookHit(source.id(), "https://example.test/book", "Book", "", "", "", Kind.TEXT);
+        BookDetail book = new BookDetail(hit, "https://example.test/toc", List.of());
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse("https://example.test/login",
+                "<title>Log in</title><p>Please sign in</p>", 200, Map.of()));
+        SourceFailure catalog = assertThrows(SourceFailure.class, () -> engine.chapters(source, book));
+        assertEquals(Stage.CATALOG, catalog.stage);
+        assertEquals("LOGIN_REQUIRED", catalog.code);
+        Chapter chapter = new Chapter(hit.url(), "https://example.test/chapter", "One", 0, false, false);
+        SourceFailure content = assertThrows(SourceFailure.class,
+                () -> engine.content(source, book, chapter, null));
+        assertEquals(Stage.CONTENT, content.stage);
+        assertEquals("LOGIN_REQUIRED", content.code);
+    }
+
+    @Test void sourceRegexUsesBrowserResourceCapture() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","bookSourceType":1,
+             "ruleContent":{"content":"@js:result","sourceRegex":".*\\\\.mp3"}}
+            """).sources().get(0);
+        WebContentTransport browser = new WebContentTransport() {
+            @Override public FetchResponse fetch(FetchRequest request) { throw new AssertionError("HTTP path used"); }
+            @Override public FetchResponse fetchContent(FetchRequest request, String sourceRegex, String webJs) {
+                assertEquals(".*\\.mp3", sourceRegex);
+                return new FetchResponse(request.url(), "https://cdn.example.test/one.mp3", 200, Map.of());
+            }
+        };
+        BookHit hit = new BookHit(source.id(), "https://example.test/book", "Book", "", "", "", Kind.AUDIO);
+        BookDetail book = new BookDetail(hit, "https://example.test/toc", List.of());
+        Chapter chapter = new Chapter(hit.url(), "https://example.test/play", "One", 0, false, false);
+        assertEquals("https://cdn.example.test/one.mp3",
+                new SourceEngine(browser).content(source, book, chapter, null).resources().get(0).url());
+    }
+
+    @Test void pagedContentSniffsOnlyTheFirstPageButKeepsWebJs() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","ruleContent":{
+              "content":"div.content@text","nextContentUrl":"a.next@href",
+              "sourceRegex":".*\\\\.mp3","webJs":"document.documentElement.outerHTML"}}
+            """).sources().get(0);
+        java.util.concurrent.atomic.AtomicInteger requests = new java.util.concurrent.atomic.AtomicInteger();
+        WebContentTransport browser = new WebContentTransport() {
+            @Override public FetchResponse fetch(FetchRequest request) { throw new AssertionError("webJs was skipped"); }
+            @Override public FetchResponse fetchContent(FetchRequest request, String regex, String webJs) {
+                int page = requests.incrementAndGet();
+                assertEquals("document.documentElement.outerHTML", webJs);
+                assertEquals(page == 1 ? ".*\\.mp3" : null, regex);
+                String html = page == 1
+                        ? "<div class='content'>First</div><a class='next' href='/page-2'>Next</a>"
+                        : "<div class='content'>Second</div>";
+                return new FetchResponse(request.url(), html, 200, Map.of());
+            }
+        };
+        BookHit hit = new BookHit(source.id(), "https://example.test/book", "Book", "", "", "", Kind.TEXT);
+        Chapter chapter = new Chapter(hit.url(), "https://example.test/one", "One", 0, false, false);
+        assertEquals("First\nSecond", new SourceEngine(browser).content(source,
+                new BookDetail(hit, hit.url(), List.of()), chapter, "https://example.test/two").text());
+        assertEquals(2, requests.get());
+    }
+
+    @Test void sourceRegexTimeoutIdentifiesTheFailedRule() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","bookSourceType":1,
+             "ruleContent":{"content":"@js:result","sourceRegex":".*\\\\.mp3"}}
+            """).sources().get(0);
+        WebContentTransport browser = new WebContentTransport() {
+            @Override public FetchResponse fetch(FetchRequest request) { throw new AssertionError(); }
+            @Override public FetchResponse fetchContent(FetchRequest request, String regex, String webJs)
+                    throws Exception { throw new WebContentTransport.NoMatchingResourceException(); }
+        };
+        BookHit hit = new BookHit(source.id(), "https://example.test/book", "Book", "", "", "", Kind.AUDIO);
+        Chapter chapter = new Chapter(hit.url(), "https://example.test/play", "One", 0, false, false);
+        SourceFailure failure = assertThrows(SourceFailure.class,
+                () -> new SourceEngine(browser).content(source,
+                        new BookDetail(hit, "https://example.test/toc", List.of()), chapter, null));
+        assertEquals("SOURCE_REGEX_NO_MATCH", failure.code);
+        assertEquals("ruleContent.sourceRegex", failure.field);
+    }
+
+    @Test void browserHttpErrorKeepsStatusAndWebJsField() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","ruleContent":{
+              "content":"div.content@text","webJs":"document.documentElement.outerHTML"}}
+            """).sources().get(0);
+        WebContentTransport browser = new WebContentTransport() {
+            @Override public FetchResponse fetch(FetchRequest request) { throw new AssertionError(); }
+            @Override public FetchResponse fetchContent(FetchRequest request, String regex, String webJs)
+                    throws Exception { throw new WebContentTransport.HttpStatusException(403, request.url()); }
+        };
+        List<StageTrace> traces = new java.util.ArrayList<>();
+        SourceEngine engine = new SourceEngine(browser, new RhinoRuntime(browser), ignored -> {}, traces::add);
+        BookHit hit = new BookHit(source.id(), "https://example.test/book", "Book", "", "", "", Kind.TEXT);
+        Chapter chapter = new Chapter(hit.url(), "https://example.test/one", "One", 0, false, false);
+        SourceFailure failure = assertThrows(SourceFailure.class,
+                () -> engine.content(source, new BookDetail(hit, hit.url(), List.of()), chapter, null));
+        assertEquals("ACCESS_DENIED", failure.code);
+        assertEquals("ruleContent.webJs", failure.field);
+        assertEquals(403, traces.get(0).status());
+    }
+
+    @Test void ordinaryWebViewRequestPreservesHttpStatus() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","searchUrl":"/search",
+             "ruleSearch":{"bookList":"a.book"}}
+            """).sources().get(0);
+        Transport transport = request -> { throw new WebContentTransport.HttpStatusException(404, request.url()); };
+        SourceFailure failure = assertThrows(SourceFailure.class,
+                () -> new SourceEngine(transport).search(source, "book", 1));
+        assertEquals("HTTP_ERROR", failure.code);
+        assertEquals("searchUrl", failure.field);
+    }
+
+    @Test void catalogPageLimitFailsInsteadOfReturningAnIncompleteCatalog() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","ruleToc":{
+              "chapterList":"a.chapter","chapterName":"text","chapterUrl":"href",
+              "nextTocUrl":"a.next@href"}}
+            """).sources().get(0);
+        java.util.concurrent.atomic.AtomicInteger fetched = new java.util.concurrent.atomic.AtomicInteger();
+        SourceEngine engine = new SourceEngine(request -> {
+            int page = Integer.parseInt(request.url().substring(request.url().lastIndexOf('/') + 1));
+            fetched.incrementAndGet();
+            return new FetchResponse(request.url(), "<a class='chapter' href='/chapter/" + page
+                    + "'>Chapter</a><a class='next' href='/toc/" + (page + 1) + "'>Next</a>", 200, Map.of());
+        });
+        BookHit hit = new BookHit(source.id(), "https://example.test/book", "Book", "", "", "", Kind.TEXT);
+        SourceFailure failure = assertThrows(SourceFailure.class,
+                () -> engine.chapters(source, new BookDetail(hit, "https://example.test/toc/0", List.of())));
+        assertEquals("PAGINATION_LIMIT", failure.code);
+        assertEquals("ruleToc.nextTocUrl", failure.field);
+        assertEquals(50, fetched.get());
+    }
+
+    @Test void contentCycleFailsInsteadOfCachingAnIncompleteChapter() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","ruleContent":{
+              "content":"div.content@text","nextContentUrl":"a.next@href"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
+                "<div class='content'>Page</div><a class='next' href='/one'>Next</a>", 200, Map.of()));
+        BookHit hit = new BookHit(source.id(), "https://example.test/book", "Book", "", "", "", Kind.TEXT);
+        Chapter chapter = new Chapter(hit.url(), "https://example.test/one", "One", 0, false, false);
+        SourceFailure failure = assertThrows(SourceFailure.class,
+                () -> engine.content(source, new BookDetail(hit, "https://example.test/toc", List.of()),
+                        chapter, "https://example.test/two"));
+        assertEquals("PAGINATION_CYCLE", failure.code);
+        assertEquals("ruleContent.nextContentUrl", failure.field);
+    }
+
+    @Test void catalogRedirectAliasFailsBeforeDuplicatingChapters() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","ruleToc":{
+              "chapterList":"a.chapter","chapterName":"text","chapterUrl":"href",
+              "nextTocUrl":"a.next@href"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse("https://example.test/toc",
+                "<a class='chapter' href='/one'>One</a><a class='next' href='/toc-alias'>Next</a>",
+                200, Map.of()));
+        BookHit hit = new BookHit(source.id(), "https://example.test/book", "Book", "", "", "", Kind.TEXT);
+        SourceFailure failure = assertThrows(SourceFailure.class,
+                () -> engine.chapters(source, new BookDetail(hit, "https://example.test/toc", List.of())));
+        assertEquals("PAGINATION_CYCLE", failure.code);
+        assertEquals("ruleToc.nextTocUrl", failure.field);
+    }
+
+    @Test void contentRedirectToNextChapterFailsBeforeMergingIt() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","ruleContent":{
+              "content":"div.content@text","nextContentUrl":"a.next@href"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> request.url().endsWith("/one")
+                ? new FetchResponse(request.url(), "<div class='content'>First</div><a class='next' href='/alias'>Next</a>", 200, Map.of())
+                : new FetchResponse("https://example.test/two", "<div class='content'>Second chapter</div>", 200, Map.of()));
+        BookHit hit = new BookHit(source.id(), "https://example.test/book", "Book", "", "", "", Kind.TEXT);
+        Chapter chapter = new Chapter(hit.url(), "https://example.test/one", "One", 0, false, false);
+        SourceFailure failure = assertThrows(SourceFailure.class,
+                () -> engine.content(source, new BookDetail(hit, "https://example.test/toc", List.of()),
+                        chapter, "https://example.test/two"));
+        assertEquals("PAGINATION_BOUNDARY", failure.code);
+        assertEquals("ruleContent.nextContentUrl", failure.field);
+    }
+
+    @Test void initialChapterRedirectToFollowingChapterIsNotMisattributed() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","ruleContent":{"content":"div.content@text"}}
+            """).sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse("https://example.test/two",
+                "<div class='content'>Second chapter</div>", 200, Map.of()));
+        BookHit hit = new BookHit(source.id(), "https://example.test/book", "Book", "", "", "", Kind.TEXT);
+        Chapter chapter = new Chapter(hit.url(), "https://example.test/one", "One", 0, false, false);
+        SourceFailure failure = assertThrows(SourceFailure.class,
+                () -> engine.content(source, new BookDetail(hit, "https://example.test/toc", List.of()),
+                        chapter, "https://example.test/two"));
+        assertEquals("PAGINATION_BOUNDARY", failure.code);
+        assertEquals("ruleContent.nextContentUrl", failure.field);
+    }
+
+    @Test void contentPageLimitFailsBeforeFetchingPageFiftyOne() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","ruleContent":{
+              "content":"div.content@text","nextContentUrl":"a.next@href"}}
+            """).sources().get(0);
+        java.util.concurrent.atomic.AtomicInteger fetched = new java.util.concurrent.atomic.AtomicInteger();
+        SourceEngine engine = new SourceEngine(request -> {
+            int page = Integer.parseInt(request.url().substring(request.url().lastIndexOf('/') + 1));
+            fetched.incrementAndGet();
+            return new FetchResponse(request.url(), "<div class='content'>Page " + page
+                    + "</div><a class='next' href='/page/" + (page + 1) + "'>Next</a>", 200, Map.of());
+        });
+        BookHit hit = new BookHit(source.id(), "https://example.test/book", "Book", "", "", "", Kind.TEXT);
+        Chapter chapter = new Chapter(hit.url(), "https://example.test/page/0", "One", 0, false, false);
+        SourceFailure failure = assertThrows(SourceFailure.class,
+                () -> engine.content(source, new BookDetail(hit, hit.url(), List.of()), chapter,
+                        "https://example.test/nextchapter"));
+        assertEquals("PAGINATION_LIMIT", failure.code);
+        assertEquals(50, fetched.get());
+    }
+
+    @Test void stageTraceRecordsFinalResponseWithoutQuerySecrets() {
+        Source source = SourceImporter.parse("""
+            {"bookSourceUrl":"https://example.test","searchUrl":"/search?token=secret",
+             "ruleSearch":{"bookList":"li.book","name":"a@text","bookUrl":"a@href"}}
+            """).sources().get(0);
+        List<StageTrace> traces = new java.util.ArrayList<>();
+        Transport transport = request -> new FetchResponse("https://example.test/results?session=hidden",
+                "<li class='book'><a href='/one'>One</a></li>", 200, Map.of());
+        SourceEngine engine = new SourceEngine(transport, new RhinoRuntime(transport), ignored -> {}, traces::add);
+        assertEquals(1, engine.search(source, "One", 1).size());
+        assertEquals(1, traces.size());
+        assertEquals(Stage.SEARCH, traces.get(0).stage());
+        assertEquals("https://example.test/search", traces.get(0).requestUrl());
+        assertEquals("https://example.test/results", traces.get(0).responseUrl());
+        assertEquals(200, traces.get(0).status());
     }
 }

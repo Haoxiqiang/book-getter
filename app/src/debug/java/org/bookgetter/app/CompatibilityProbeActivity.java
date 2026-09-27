@@ -15,7 +15,7 @@ import org.bookgetter.core.SourceEngine;
 import org.bookgetter.core.SourceImporter;
 import org.bookgetter.core.ResponseSignals;
 import org.bookgetter.core.RhinoRuntime;
-import org.bookgetter.core.Transport;
+import org.bookgetter.core.WebContentTransport;
 import org.bookgetter.runtime.AndroidTransport;
 
 /** Debug-build-only entry point for repeatable on-device source-stage diagnostics. */
@@ -29,6 +29,7 @@ public final class CompatibilityProbeActivity extends Activity {
         String keyword = getIntent().getStringExtra("keyword");
         String directBookUrl = getIntent().getStringExtra("directBookUrl");
         boolean captureFirst = getIntent().getBooleanExtra("captureFirst", false);
+        boolean downloadFirstResource = getIntent().getBooleanExtra("downloadFirstResource", false);
         boolean catalogFirst = getIntent().getBooleanExtra("catalogFirst", false);
         boolean directCatalogOnly = directBookUrl != null && !captureFirst;
         int readableChapterIndex = getIntent().getIntExtra("chapterIndex", 0);
@@ -49,33 +50,48 @@ public final class CompatibilityProbeActivity extends Activity {
                                 : item.id().contains(sourceFilter) || item.name().contains(sourceFilter))
                         .findFirst().orElseThrow(() -> new IllegalArgumentException("No source: " + sourceFilter));
                 List<String> responseQualities = new java.util.ArrayList<>();
-                Transport observed = request -> {
-                    if (request.webView() && webViewDelayOverride >= 0)
-                        request = new FetchRequest(request.url(), request.method(), request.headers(), request.body(),
-                                request.charset(), true, webViewDelayOverride);
-                    FetchResponse response = transport.fetch(request);
-                    String body = response.body() == null ? "" : response.body();
-                    String title = "";
-                    java.util.regex.Matcher titleMatch = java.util.regex.Pattern.compile("(?is)<title[^>]*>(.*?)</title>").matcher(body);
-                    if (titleMatch.find()) title = titleMatch.group(1).replaceAll("<[^>]*>", "");
-                    String quality = ResponseSignals.quality(response);
-                    responseQualities.addAll(ResponseSignals.probeSignals(request, response));
-                    String host;
-                    try { host = new java.net.URI(response.url()).getHost(); }
-                    catch (Exception ignored) { host = "invalid-url"; }
-                    String requestHost;
-                    try { requestHost = new java.net.URI(request.url()).getHost(); }
-                    catch (Exception ignored) { requestHost = "invalid-url"; }
-                    String responsePath;
-                    try { responsePath = new java.net.URI(response.url()).getPath(); }
-                    catch (Exception ignored) { responsePath = "invalid-url"; }
-                    Log.i(TAG, clean("FETCH requestMethod=" + request.method() + " webView=" + request.webView()
-                            + " status=" + response.status() + " host=" + host
-                            + " path=" + responsePath
-                            + (host.equals(requestHost) ? "" : " from=" + requestHost)
-                            + (response.url().equals(request.url()) ? "" : " redirectFinalMethod=UNOBSERVED")
-                            + " length=" + body.length() + " quality=" + quality + " title=" + title));
-                    return response;
+                WebContentTransport observed = new WebContentTransport() {
+                    private FetchRequest withDelay(FetchRequest request, boolean browserContent) {
+                        return (request.webView() || browserContent) && webViewDelayOverride >= 0
+                                ? new FetchRequest(request.url(), request.method(), request.headers(), request.body(),
+                                        request.charset(), true, webViewDelayOverride)
+                                : request;
+                    }
+                    @Override public FetchResponse fetch(FetchRequest input) throws Exception {
+                        FetchRequest request = withDelay(input, false);
+                        FetchResponse response = transport.fetch(request);
+                        record(request, response, false);
+                        return response;
+                    }
+                    @Override public FetchResponse fetchContent(FetchRequest input, String sourceRegex, String webJs) throws Exception {
+                        FetchRequest request = withDelay(input, true);
+                        FetchResponse response = transport.fetchContent(request, sourceRegex, webJs);
+                        record(request, response, true);
+                        return response;
+                    }
+                    private void record(FetchRequest request, FetchResponse response, boolean browserContent) {
+                        String body = response.body() == null ? "" : response.body();
+                        String title = "";
+                        java.util.regex.Matcher titleMatch = java.util.regex.Pattern.compile("(?is)<title[^>]*>(.*?)</title>").matcher(body);
+                        if (titleMatch.find()) title = titleMatch.group(1).replaceAll("<[^>]*>", "");
+                        String quality = ResponseSignals.quality(response);
+                        responseQualities.addAll(ResponseSignals.probeSignals(request, response));
+                        String host;
+                        try { host = new java.net.URI(response.url()).getHost(); }
+                        catch (Exception ignored) { host = "invalid-url"; }
+                        String requestHost;
+                        try { requestHost = new java.net.URI(request.url()).getHost(); }
+                        catch (Exception ignored) { requestHost = "invalid-url"; }
+                        String responsePath;
+                        try { responsePath = new java.net.URI(response.url()).getPath(); }
+                        catch (Exception ignored) { responsePath = "invalid-url"; }
+                        Log.i(TAG, clean("FETCH requestMethod=" + request.method() + " webView="
+                                + (request.webView() || browserContent) + " status=" + response.status()
+                                + " host=" + host + " path=" + responsePath
+                                + (host.equals(requestHost) ? "" : " from=" + requestHost)
+                                + (response.url().equals(request.url()) ? "" : " redirectFinalMethod=UNOBSERVED")
+                                + " length=" + body.length() + " quality=" + quality + " title=" + title));
+                    }
                 };
                 java.util.Set<String> warnedFields = new java.util.HashSet<>();
                 SourceEngine engine = new SourceEngine(observed, new RhinoRuntime(observed), diagnostic -> {
@@ -133,6 +149,12 @@ public final class CompatibilityProbeActivity extends Activity {
                                 + " rawCharacters=" + (content.text() == null ? 0 : content.text().length())
                                 + " visibleCharacters=" + ResponseSignals.visibleCharacters(content.text())
                                 + " resources=" + content.resources().size()));
+                        if (downloadFirstResource && !content.resources().isEmpty()) {
+                            java.io.ByteArrayOutputStream sample = new java.io.ByteArrayOutputStream();
+                            new org.bookgetter.runtime.ResourceDownloader().download(
+                                    source, content.resources().get(0), sample);
+                            Log.i(TAG, "RESOURCE_OK bytes=" + sample.size());
+                        }
                     }
                 }
             } catch (Exception error) {
@@ -141,14 +163,19 @@ public final class CompatibilityProbeActivity extends Activity {
                 Throwable root = error;
                 while (root.getCause() != null) root = root.getCause();
                 Log.e(TAG, clean("ERROR " + stage + error.getClass().getSimpleName() + ": " + error.getMessage()
-                        + " cause=" + root.getClass().getSimpleName() + ": " + root.getMessage()), error);
+                        + " cause=" + root.getClass().getSimpleName() + ": " + root.getMessage()));
             } finally {
                 runOnUiThread(this::finish);
             }
         }, "book-source-compatibility-probe").start();
     }
 
-    private static String clean(String text) { return text.replaceAll("[\\r\\n\\t]+", " "); }
+    private static String clean(String text) {
+        int html = text.indexOf('<');
+        if (html >= 0) text = text.substring(0, html) + "<HTML omitted>";
+        text = text.replaceAll("[\\r\\n\\t]+", " ");
+        return text.length() > 400 ? text.substring(0, 400) + "…" : text;
+    }
 
     private static boolean validHttpBookUrl(String value) {
         try {

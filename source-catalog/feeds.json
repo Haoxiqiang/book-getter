@@ -1,4 +1,5 @@
 [
+  {"file":"miaogongziDY.json","url":"http://yuedu.miaogongzi.net/shuyuan/miaogongziDY.json","allowHttp":true,"model":"rss"},
   {"file":"bilinovel.json","url":"https://raw.githubusercontent.com/jiwangyihao/source-j-legado/main/bilinovel.json"},
   {"file":"bilinovel-like.json","url":"https://raw.githubusercontent.com/jiwangyihao/source-j-legado/main/bilinovel-like.json"},
   {"file":"wenku.json","url":"https://raw.githubusercontent.com/jiwangyihao/source-j-legado/main/wenku.json"},
@@ -7,5 +8,9 @@
   {"file":"fishhawk.json","url":"https://raw.githubusercontent.com/jiwangyihao/source-j-legado/main/fishhawk.json"},
   {"file":"masiro.json","url":"https://raw.githubusercontent.com/jiwangyihao/source-j-legado/main/masiro.json"},
   {"file":"esjzone.json","url":"https://raw.githubusercontent.com/jiwangyihao/source-j-legado/main/esjzone.json"},
-  {"file":"zaimanhua.json","url":"https://raw.githubusercontent.com/jiwangyihao/source-j-legado/main/zaimanhua.json"}
+  {"file":"zaimanhua.json","url":"https://raw.githubusercontent.com/jiwangyihao/source-j-legado/main/zaimanhua.json"},
+  {"file":"yckceo-7860.json","url":"https://www.yckceo.com/yuedu/shuyuan/json/id/7860.json"},
+  {"file":"yckceo-7789.json","url":"https://www.yckceo.com/yuedu/shuyuan/json/id/7789.json"},
+  {"file":"yckceo-7779.json","url":"https://www.yckceo.com/yuedu/shuyuan/json/id/7779.json"},
+  {"file":"yckceo-7818.json","url":"https://www.yckceo.com/yuedu/shuyuan/json/id/7818.json"}
 ]

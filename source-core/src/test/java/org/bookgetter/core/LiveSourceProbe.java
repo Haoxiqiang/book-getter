@@ -41,13 +41,15 @@ public final class LiveSourceProbe {
 
     public static void main(String[] args) throws Exception {
         if (args.length < 2 || !(args[0].equals("--catalog") || args[0].equals("--json-url")))
-            throw new IllegalArgumentException("Usage: --catalog <catalog-directory> | --json-url <source-json-url> [--source name-or-url-substring[,more] | =exact-bookSourceUrl] [--catalog-first | --capture-first] [--chapter-index nonnegative] [--book-url detail-url] [queries...]");
+            throw new IllegalArgumentException("Usage: --catalog <catalog-directory> | --json-url <source-json-url> [--source name-or-url-substring[,more] | =exact-bookSourceUrl] [--explore-first] [--catalog-first | --capture-first] [--chapter-index nonnegative] [--book-url detail-url] [queries...]");
         int queryStart = 2;
         String sourceFilter = "";
         if (args.length >= 4 && args[2].equals("--source")) {
             sourceFilter = args[3];
             queryStart = 4;
         }
+        boolean exploreFirst = args.length > queryStart && args[queryStart].equals("--explore-first");
+        if (exploreFirst) queryStart++;
         boolean catalogFirst = args.length > queryStart && args[queryStart].equals("--catalog-first");
         boolean captureFirst = catalogFirst || (args.length > queryStart && args[queryStart].equals("--capture-first"));
         if (captureFirst) queryStart++;
@@ -142,7 +144,9 @@ public final class LiveSourceProbe {
                 try {
                     diagnostics.clear();
                     int qualityStart = responseQualities.size();
-                    List<BookHit> hits = directBookUrl == null ? engine.search(source, keyword, 1)
+                    List<BookHit> hits = directBookUrl == null ? exploreFirst
+                            ? engine.explore(source, engine.exploreEntries(source).get(0), 1)
+                            : engine.search(source, keyword, 1)
                             : List.of(new BookHit(source.id(), directBookUrl, directBookUrl,
                                     "", "", "", source.kind()));
                     diagnostics.stream().filter(diagnostic -> diagnostic.severity() == org.bookgetter.core.Models.Severity.INFO)
@@ -155,7 +159,8 @@ public final class LiveSourceProbe {
                     boolean suspectSearch = responseQualities.subList(qualityStart, responseQualities.size()).stream()
                             .anyMatch(ResponseSignals::suspectEmptySearch);
                     String status = directBookUrl != null ? "SEARCH_SKIPPED_DIRECT_BOOK"
-                            : hits.isEmpty() ? (suspectSearch ? "RESPONSE_SUSPECT" : "ZERO_UNVERIFIED") : "OK";
+                            : hits.isEmpty() ? (suspectSearch ? "RESPONSE_SUSPECT" : "ZERO_UNVERIFIED")
+                            : exploreFirst ? "EXPLORE_OK" : "OK";
                     System.out.println(row(source.name(), keyword, status,
                             Integer.toString(hits.size()), first, hits.isEmpty() ? "" : metadataFlags(hits.get(0))));
                     if (captureFirst && !hits.isEmpty()) {
@@ -356,6 +361,10 @@ public final class LiveSourceProbe {
             if (frame.getClassName().startsWith("org.bookgetter.")) { location = frame; break; }
         }
         String where = location == null ? "" : " at " + location.getClassName() + ":" + location.getLineNumber();
-        return stage + root.getClass().getSimpleName() + ": " + root.getMessage() + where;
+        String message = String.valueOf(root.getMessage());
+        int html = message.indexOf('<');
+        if (html >= 0) message = message.substring(0, html) + "<HTML omitted>";
+        if (message.length() > 300) message = message.substring(0, 300) + "…";
+        return stage + root.getClass().getSimpleName() + ": " + message + where;
     }
 }

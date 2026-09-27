@@ -8,4 +8,6 @@ android {
 dependencies {
     api project(':source-core')
     implementation 'com.squareup.okhttp3:okhttp:3.14.9'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'com.squareup.okhttp3:mockwebserver:3.14.9'
 }

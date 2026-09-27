@@ -1,6 +1,7 @@
 package org.bookgetter.export;
 
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -20,29 +21,48 @@ import org.jsoup.nodes.TextNode;
 /** EPUB 2 and UTF-8 TXT output for selected text chapters. Owns no source fetching. */
 public final class BookExporter {
     public enum Format { TXT, EPUB }
+    @FunctionalInterface public interface ChapterLoader {
+        ChapterContent load(int index) throws IOException;
+    }
 
     public void write(Format format, BookDetail book, List<ChapterContent> chapters, OutputStream output) throws IOException {
-        if (format == null || book == null || book.hit() == null || output == null || chapters == null)
+        if (chapters == null) throw new IllegalArgumentException("Chapters are required");
+        for (ChapterContent chapter : chapters) requireText(chapter);
+        writeFrom(format, book, chapters.size(), chapters::get, output);
+    }
+
+    /** Loads one cached chapter at a time; callers retain the cache until the output stream closes. */
+    public void writeFrom(Format format, BookDetail book, int chapterCount, ChapterLoader loader,
+                          OutputStream output) throws IOException {
+        if (format == null || book == null || book.hit() == null || output == null || loader == null)
             throw new IllegalArgumentException("Format, book, chapters and output are required");
-        if (chapters.isEmpty()) throw new IllegalArgumentException("No chapters selected");
-        for (ChapterContent chapter : chapters) {
-            if (chapter == null || chapter.chapter() == null || chapter.kind() != Kind.TEXT || chapter.text() == null)
-                throw new IllegalArgumentException("EPUB/TXT export accepts text chapters only");
-        }
-        if (format == Format.TXT) writeText(book, chapters, output); else writeEpub(book, chapters, output);
+        if (chapterCount <= 0) throw new IllegalArgumentException("No chapters selected");
+        requireActive();
+        if (format == Format.TXT) writeText(book, chapterCount, loader, output);
+        else writeEpub(book, chapterCount, loader, output);
     }
 
-    private void writeText(BookDetail book, List<ChapterContent> chapters, OutputStream output) throws IOException {
-        StringBuilder text = new StringBuilder(cleanXml(book.hit().name()))
-                .append("\n作者：").append(cleanXml(book.hit().author())).append("\n\n");
-        for (ChapterContent chapter : chapters) {
-            text.append(cleanXml(chapter.chapter().title())).append("\n\n");
-            text.append(String.join("\n", paragraphs(chapter.text()))).append("\n\n");
-        }
-        output.write(text.toString().getBytes(StandardCharsets.UTF_8));
+    private static ChapterContent requireText(ChapterContent chapter) {
+        if (chapter == null || chapter.chapter() == null || chapter.kind() != Kind.TEXT || chapter.text() == null)
+            throw new IllegalArgumentException("EPUB/TXT export accepts text chapters only");
+        return chapter;
     }
 
-    private void writeEpub(BookDetail book, List<ChapterContent> chapters, OutputStream output) throws IOException {
+    private void writeText(BookDetail book, int chapterCount, ChapterLoader loader, OutputStream output) throws IOException {
+        writeTextChunk(output, cleanXml(book.hit().name()) + "\n作者：" + cleanXml(book.hit().author()) + "\n\n");
+        for (int i = 0; i < chapterCount; i++) {
+            requireActive();
+            ChapterContent chapter = requireText(loader.load(i));
+            writeTextChunk(output, cleanXml(chapter.chapter().title()) + "\n\n");
+            writeTextChunk(output, String.join("\n", paragraphs(chapter.text())) + "\n\n");
+        }
+    }
+
+    private static void writeTextChunk(OutputStream output, String value) throws IOException {
+        output.write(value.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private void writeEpub(BookDetail book, int chapterCount, ChapterLoader loader, OutputStream output) throws IOException {
         ZipOutputStream zip = new ZipOutputStream(output, StandardCharsets.UTF_8);
         byte[] mimetype = "application/epub+zip".getBytes(StandardCharsets.US_ASCII);
         CRC32 crc = new CRC32(); crc.update(mimetype);
@@ -53,9 +73,10 @@ public final class BookExporter {
         StringBuilder manifest = new StringBuilder("<item id=\"toc\" href=\"toc.ncx\" media-type=\"application/x-dtbncx+xml\"/>");
         StringBuilder spine = new StringBuilder();
         StringBuilder nav = new StringBuilder();
-        for (int i = 0; i < chapters.size(); i++) {
+        for (int i = 0; i < chapterCount; i++) {
+            requireActive();
             String id = "c" + i;
-            ChapterContent chapter = chapters.get(i);
+            ChapterContent chapter = requireText(loader.load(i));
             manifest.append("<item id=\"").append(id).append("\" href=\"").append(id).append(".xhtml\" media-type=\"application/xhtml+xml\"/>");
             spine.append("<itemref idref=\"").append(id).append("\"/>");
             nav.append("<navPoint id=\"").append(id).append("\" playOrder=\"").append(i + 1).append("\"><navLabel><text>").append(xml(chapter.chapter().title())).append("</text></navLabel><content src=\"").append(id).append(".xhtml\"/></navPoint>");
@@ -90,6 +111,10 @@ public final class BookExporter {
 
     private static void entry(ZipOutputStream zip, String name, String text) throws IOException {
         zip.putNextEntry(new ZipEntry(name)); zip.write(text.getBytes(StandardCharsets.UTF_8)); zip.closeEntry();
+    }
+
+    private static void requireActive() throws InterruptedIOException {
+        if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("Export cancelled");
     }
 
     private static String xml(String value) {

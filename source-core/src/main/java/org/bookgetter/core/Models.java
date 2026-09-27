@@ -36,6 +36,7 @@ public final class Models {
         public boolean isJsSource() { return string("mainJs") != null && !string("mainJs").isBlank(); }
     }
     public record ImportResult(List<Source> sources, List<String> sourceUrls, List<Diagnostic> diagnostics) {}
+    public record ExploreEntry(String title, String url) {}
     public record BookHit(String sourceId, String url, String name, String author, String intro, String coverUrl,
                           Kind kind, String genre, String wordCount, String lastChapter,
                           Map<String, String> variables) {
@@ -70,16 +71,33 @@ public final class Models {
         }
     }
     public record FetchResponse(String url, String body, int status, Map<String, String> headers) {}
-    public record SearchResult(List<BookHit> hits, Map<String, String> errors) {}
+    public record StageTrace(Stage stage, String sourceId, String field, String method,
+                             String requestUrl, String responseUrl, int status, String responseQuality) {}
+    public record SearchResult(List<BookHit> hits, Map<String, String> errors,
+                               Map<String, SourceFailure> failures) {
+        public SearchResult(List<BookHit> hits, Map<String, String> errors) {
+            this(hits, errors, Map.of());
+        }
+    }
     public record CaptureReport(List<ChapterContent> chapters, Map<Integer, String> failures) {}
 
     public static final class SourceFailure extends RuntimeException {
         public final Stage stage;
         public final String sourceId;
         public final String field;
+        public final String code;
         public SourceFailure(Stage stage, String sourceId, String field, String message, Throwable cause) {
-            super(message, cause); this.stage = stage; this.sourceId = sourceId; this.field = field;
+            this(stage, sourceId, field, "RULE_ERROR", message, cause);
         }
-        public SourceFailure(Stage stage, String sourceId, String field, String message) { this(stage, sourceId, field, message, null); }
+        public SourceFailure(Stage stage, String sourceId, String field, String message) {
+            this(stage, sourceId, field, message, (Throwable) null);
+        }
+        public SourceFailure(Stage stage, String sourceId, String field, String code, String message) {
+            this(stage, sourceId, field, code, message, null);
+        }
+        public SourceFailure(Stage stage, String sourceId, String field, String code, String message, Throwable cause) {
+            super(message, cause);
+            this.stage = stage; this.sourceId = sourceId; this.field = field; this.code = code;
+        }
     }
 }

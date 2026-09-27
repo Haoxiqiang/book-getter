@@ -19,6 +19,7 @@ import org.bookgetter.core.Models.*;
 import org.mozilla.javascript.BaseFunction;
 import org.mozilla.javascript.ClassShutter;
 import org.mozilla.javascript.Context;
+import org.mozilla.javascript.ContextFactory;
 import org.mozilla.javascript.NativeArray;
 import org.mozilla.javascript.Scriptable;
 import org.mozilla.javascript.ScriptableObject;
@@ -28,14 +29,50 @@ import org.jsoup.select.Elements;
 
 /** A narrow JS host. Unknown Legado java.* methods raise normal JS errors. */
 public final class RhinoRuntime implements ScriptRuntime {
+    private static final long SCRIPT_TIMEOUT_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(60);
+    private static final ThreadLocal<Long> DEADLINE = new ThreadLocal<>();
+    private static final ContextFactory INTERRUPTIBLE_CONTEXTS = new ContextFactory() {
+        @Override protected void observeInstructionCount(Context context, int instructionCount) {
+            // Rhino's interpreter only checks interruption when instruction counting is enabled.
+            if (Thread.currentThread().isInterrupted())
+                throw new IllegalStateException("JavaScript execution interrupted");
+            Long deadline = DEADLINE.get();
+            if (deadline != null && System.nanoTime() - deadline >= 0)
+                throw new IllegalStateException("JavaScript execution exceeded 60 seconds");
+        }
+    };
     private final Transport transport;
     private final Consumer<String> notification;
     private final Gson gson = new Gson();
     private final Map<String, Map<String, String>> sourceVariables = new ConcurrentHashMap<>();
+    private final ThreadLocal<Map<String, Object>> currentBook = new ThreadLocal<>();
     public RhinoRuntime(Transport transport) { this(transport, ignored -> {}); }
     public RhinoRuntime(Transport transport, Consumer<String> notification) {
         this.transport = transport;
         this.notification = notification;
+    }
+
+    @Override public void enterBook(Map<String, Object> book) {
+        Map<String, Object> state = new LinkedHashMap<>(book);
+        Map<String, String> variables = new LinkedHashMap<>();
+        if (book.get("variables") instanceof Map<?, ?> existing)
+            existing.forEach((key, value) -> variables.put(String.valueOf(key), String.valueOf(value)));
+        state.put("variables", variables);
+        state.put("reverseToc", "true".equals(variables.get("__bookgetter.reverseToc")));
+        currentBook.set(state);
+    }
+
+    @Override public void leaveBook() { currentBook.remove(); }
+    @Override public Map<String, String> bookVariables() {
+        Map<String, Object> state = currentBook.get();
+        if (state == null || !(state.get("variables") instanceof Map<?, ?> variables)) return Map.of();
+        Map<String, String> result = new LinkedHashMap<>();
+        variables.forEach((key, value) -> result.put(String.valueOf(key), String.valueOf(value)));
+        return result;
+    }
+    @Override public boolean reverseToc() {
+        Map<String, Object> state = currentBook.get();
+        return state != null && Boolean.TRUE.equals(state.get("reverseToc"));
     }
 
     @Override public Object evaluate(String script, Map<String, Object> bindings, Source source) {
@@ -58,9 +95,12 @@ public final class RhinoRuntime implements ScriptRuntime {
     }
 
     private Object run(String code, Map<String, Object> bindings, Source source) {
-        Context cx = Context.enter();
+        boolean outermost = DEADLINE.get() == null;
+        if (outermost) DEADLINE.set(System.nanoTime() + SCRIPT_TIMEOUT_NANOS);
+        Context cx = INTERRUPTIBLE_CONTEXTS.enterContext();
         try {
             cx.setOptimizationLevel(-1);
+            cx.setInstructionObserverThreshold(10_000);
             cx.setLanguageVersion(Context.VERSION_ES6);
             cx.setClassShutter(fullName -> false);
             ScriptableObject scope = cx.initSafeStandardObjects();
@@ -123,6 +163,18 @@ public final class RhinoRuntime implements ScriptRuntime {
                     return hostRules.one(rule, input, ruleBaseUrl, source, false);
                 }
             });
+            ScriptableObject.putProperty(java, "getStringList", new BaseFunction() {
+                @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
+                    String rule = args.length == 0 ? "" : Context.toString(args[0]);
+                    Object input = args.length > 1 && args[1] != Undefined.instance
+                            ? Context.toString(args[1]) : ruleContent[0];
+                    // RuleEvaluator.one applies Legado's terminal @text/@href action and
+                    // fallback branches; many() alone returns selector nodes.
+                    String selected = hostRules.one(rule, input, ruleBaseUrl, source, false);
+                    List<String> values = selected.isEmpty() ? List.of() : List.of(selected.split("\\n", -1));
+                    return stringListView(context, scope, values);
+                }
+            });
             ScriptableObject.putProperty(java, "base64Encode", new BaseFunction() {
                 @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
                     String value = args.length == 0 ? "" : Context.toString(args[0]);
@@ -169,7 +221,13 @@ public final class RhinoRuntime implements ScriptRuntime {
             ScriptableObject.putProperty(java, "ajax", new BaseFunction() {
                 @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
                     String url = args.length == 0 ? "" : Context.toString(args[0]);
-                    try { return transport.fetch(nestedRequest(url, bindings, source)).body(); }
+                    try {
+                        FetchResponse response = transport.fetch(nestedRequest(url, bindings, source));
+                        String quality = ResponseSignals.quality(response);
+                        if (quality.equals("CHALLENGE_PAGE"))
+                            throw new IllegalStateException("Nested request returned CHALLENGE_PAGE");
+                        return response.body();
+                    }
                     catch (Exception e) { throw Context.throwAsScriptRuntimeEx(e); }
                 }
             });
@@ -217,7 +275,9 @@ public final class RhinoRuntime implements ScriptRuntime {
             });
             ScriptableObject.putProperty(java, "t2s", new BaseFunction() {
                 @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
-                    return args.length == 0 ? "" : Context.toString(args[0]);
+                    String value = args.length == 0 || args[0] == null || args[0] == Undefined.instance
+                            ? "" : Context.toString(args[0]);
+                    return ChineseText.t2s(value);
                 }
             });
             ScriptableObject.putProperty(java, "timeFormatUTC", new BaseFunction() {
@@ -232,6 +292,11 @@ public final class RhinoRuntime implements ScriptRuntime {
             if (source != null) {
                 bind(cx, scope, "source", source.json(), nativeViews);
                 Scriptable sourceObject = (Scriptable) ScriptableObject.getProperty(scope, "source");
+                ScriptableObject.putProperty(sourceObject, "getBookSourceUrl", new BaseFunction() {
+                    @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
+                        return source.id();
+                    }
+                });
                 ScriptableObject.putProperty(sourceObject, "getLoginHeader", new BaseFunction() {
                     @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
                         return null;
@@ -240,14 +305,51 @@ public final class RhinoRuntime implements ScriptRuntime {
                 ScriptableObject.putProperty(sourceObject, "getVariable", emptyStringFunction());
                 ScriptableObject.putProperty(sourceObject, "key", source.id());
             }
+            // Explicit mainJs arguments take precedence over the enclosing ordinary-rule context.
+            if (!bindings.containsKey("book") && currentBook.get() != null)
+                bind(cx, scope, "book", currentBook.get(), nativeViews);
             for (Map.Entry<String, Object> binding : bindings.entrySet())
                 bind(cx, scope, binding.getKey(), binding.getValue(), nativeViews);
-            if (!bindings.containsKey("book")) {
+            if (!bindings.containsKey("src"))
+                bind(cx, scope, "src", bindings.getOrDefault("result", ""), nativeViews);
+            if (!bindings.containsKey("book") && currentBook.get() == null) {
                 ScriptableObject.putProperty(scope, "book", cx.newObject(scope));
             }
             Object book = ScriptableObject.getProperty(scope, "book");
-            if (book instanceof Scriptable bookObject)
-                ScriptableObject.putProperty(bookObject, "getVariable", emptyStringFunction());
+            if (book instanceof Scriptable bookObject) {
+                ScriptableObject.putProperty(bookObject, "getVariable", new BaseFunction() {
+                    @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
+                        String key = args.length == 0 ? "" : Context.toString(args[0]);
+                        return bookVariables().getOrDefault(key, "");
+                    }
+                });
+                ScriptableObject.putProperty(bookObject, "putVariable", new BaseFunction() {
+                    @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
+                        if (args.length < 2) throw Context.reportRuntimeError("book.putVariable requires key and value");
+                        Map<String, Object> state = currentBook.get();
+                        if (state == null) throw Context.reportRuntimeError("book.putVariable requires a book");
+                        @SuppressWarnings("unchecked") Map<String, String> variables =
+                                (Map<String, String>) state.get("variables");
+                        String key = Context.toString(args[0]);
+                        if (args[1] == null || args[1] == Undefined.instance) return variables.remove(key) != null;
+                        variables.put(key, Context.toString(args[1]));
+                        return true;
+                    }
+                });
+                ScriptableObject.putProperty(bookObject, "setReverseToc", new BaseFunction() {
+                    @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
+                        Map<String, Object> state = currentBook.get();
+                        if (state == null) throw Context.reportRuntimeError("book.setReverseToc requires a book");
+                        state.put("reverseToc", args.length > 0 && Context.toBoolean(args[0]));
+                        return Undefined.instance;
+                    }
+                });
+                ScriptableObject.putProperty(bookObject, "getReverseToc", new BaseFunction() {
+                    @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
+                        return reverseToc();
+                    }
+                });
+            }
             String library = source == null ? null : source.string("jsLib");
             if (library != null && !library.isBlank()) cx.evaluateString(scope, library, "book-source-library", 1, null);
             Object result = cx.evaluateString(scope, code, "book-source", 1, null);
@@ -258,7 +360,10 @@ public final class RhinoRuntime implements ScriptRuntime {
             ScriptableObject.putProperty(scope, "__bookGetterResult", result);
             Object json = cx.evaluateString(scope, "JSON.stringify(__bookGetterResult)", "result", 1, null);
             return json == Undefined.instance ? null : Context.toString(json);
-        } finally { Context.exit(); }
+        } finally {
+            Context.exit();
+            if (outermost) DEADLINE.remove();
+        }
     }
 
     private static void installJsoupFacade(Context context, ScriptableObject scope,
@@ -395,6 +500,23 @@ public final class RhinoRuntime implements ScriptRuntime {
         return null;
     }
 
+    /** Minimal Java List view used by Legado rules that call size() and get(index). */
+    private static Scriptable stringListView(Context context, Scriptable scope, List<String> values) {
+        Scriptable view = context.newArray(scope, values.toArray());
+        ScriptableObject.putProperty(view, "size", new BaseFunction() {
+            @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
+                return values.size();
+            }
+        });
+        ScriptableObject.putProperty(view, "get", new BaseFunction() {
+            @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
+                int index = args.length == 0 ? -1 : (int) Context.toNumber(args[0]);
+                return index < 0 || index >= values.size() ? null : values.get(index);
+            }
+        });
+        return view;
+    }
+
     private static Scriptable elementView(Context context, Scriptable scope, Element element,
                                           IdentityHashMap<Scriptable, Object> nativeViews) {
         Scriptable view = context.newObject(scope);
@@ -418,6 +540,12 @@ public final class RhinoRuntime implements ScriptRuntime {
             @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
                 return elementsView(context, callScope,
                         element.select(args.length == 0 ? "" : Context.toString(args[0])), nativeViews);
+            }
+        });
+        ScriptableObject.putProperty(view, "remove", new BaseFunction() {
+            @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
+                element.remove();
+                return view;
             }
         });
         ScriptableObject.putProperty(view, "text", stringMethod(element::text));
@@ -448,6 +576,18 @@ public final class RhinoRuntime implements ScriptRuntime {
             @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
                 return elementsView(context, callScope,
                         elements.select(args.length == 0 ? "" : Context.toString(args[0])), nativeViews);
+            }
+        });
+        ScriptableObject.putProperty(view, "remove", new BaseFunction() {
+            @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
+                // Jsoup's collection operation detaches the selected nodes from their shared DOM.
+                elements.remove();
+                return view;
+            }
+        });
+        ScriptableObject.putProperty(view, "eachText", new BaseFunction() {
+            @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
+                return stringListView(context, callScope, elements.eachText());
             }
         });
         ScriptableObject.putProperty(view, "first", new BaseFunction() {

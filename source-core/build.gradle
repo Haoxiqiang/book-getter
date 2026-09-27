@@ -5,6 +5,7 @@ dependencies {
     implementation 'org.jsoup:jsoup:1.23.2'
     implementation 'com.jayway.jsonpath:json-path:3.0.0'
     implementation 'org.mozilla:rhino:1.7.15'
+    implementation 'com.github.liuyueyi.quick-chinese-transfer:quick-transfer-core:0.2.17'
     testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
     testImplementation project(':export')
 }
@@ -23,6 +24,9 @@ tasks.register('liveSourceProbe', JavaExec) {
     }
     if (project.hasProperty('probeSource')) {
         args '--source', project.property('probeSource').toString()
+    }
+    if (project.hasProperty('probeExploreFirst') && project.property('probeExploreFirst').toString().toBoolean()) {
+        args '--explore-first'
     }
     if (project.hasProperty('probeCatalogFirst') && project.property('probeCatalogFirst').toString().toBoolean()) {
         args '--catalog-first'
@@ -49,13 +53,29 @@ tasks.register('batchDownloadProbe', JavaExec) {
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'org.bookgetter.core.BatchDownloadProbe'
     workingDir = rootProject.projectDir
-    args rootProject.file('source-catalog').absolutePath,
-            rootProject.file('downloads/batch').absolutePath,
+    args rootProject.file(project.findProperty('batchCatalog') ?: 'source-catalog').absolutePath,
+            rootProject.file(project.findProperty('batchOutput') ?: 'downloads/batch').absolutePath,
             project.findProperty('batchSource') ?: 'novelia.cc',
             project.findProperty('batchTarget') ?: '3',
             project.findProperty('batchMaxChapters') ?: '40',
             project.findProperty('batchMaxPages') ?: '10',
             project.findProperty('batchDelayMs') ?: '2000'
+    if (project.hasProperty('batchBookUrl')) args project.property('batchBookUrl').toString()
+}
+
+tasks.register('comicDownloadProbe', JavaExec) {
+    group = 'verification'
+    description = 'Opt-in, rate-limited, resumable exact comic download verification.'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'org.bookgetter.core.ComicDownloadProbe'
+    workingDir = rootProject.projectDir
+    args rootProject.file(project.findProperty('comicCatalog') ?: 'source-catalog').absolutePath,
+            rootProject.file(project.findProperty('comicOutput') ?: 'downloads/targets/comic').absolutePath,
+            project.findProperty('comicSource') ?: '包子漫画',
+            project.findProperty('comicBookUrl') ?: '',
+            project.findProperty('comicMaxChapters') ?: '300',
+            project.findProperty('comicDelayMs') ?: '1500',
+            project.findProperty('comicParallel') ?: '1'
 }
 
 tasks.register('auditBookDownloads', JavaExec) {
@@ -64,7 +84,26 @@ tasks.register('auditBookDownloads', JavaExec) {
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'org.bookgetter.core.BookDownloadAudit'
     workingDir = rootProject.projectDir
-    args rootProject.file('downloads/batch/books').absolutePath,
+    args rootProject.file(project.findProperty('auditBooks') ?: 'downloads/batch/books').absolutePath,
             project.findProperty('auditSource') ?: 'https://n.novelia.cc/',
             project.findProperty('auditMinimum') ?: '1'
+}
+
+tasks.register('auditComicDownload', JavaExec) {
+    group = 'verification'
+    description = 'Offline independent check of a complete comic download and every CBZ image.'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'org.bookgetter.core.ComicDownloadAudit'
+    workingDir = rootProject.projectDir
+    args rootProject.file(project.findProperty('auditComic') ?: 'downloads/targets/prince-of-tennis').absolutePath,
+            project.findProperty('auditComicSource') ?: 'https://cn.bzmanga.com',
+            project.findProperty('auditComicChapters') ?: '184'
+}
+
+tasks.register('probeMiaogongziDirectory', JavaExec) {
+    group = 'verification'
+    description = 'Opt-in live discovery of Miaogongzi collections and an optional selected feed.'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'org.bookgetter.core.MiaogongziDirectoryLiveProbe'
+    if (project.hasProperty('directoryCollection')) args project.property('directoryCollection').toString()
 }

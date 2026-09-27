@@ -95,6 +95,15 @@ public final class ResponseSignals {
             return "CLIENT_SIDE_REDIRECT";
         if (lower.contains("<title>just a moment...") || lower.contains("cloudflare challenge")
                 || lower.contains("cf-chl-")) return "CHALLENGE_PAGE";
+        if (lower.contains("__paris_challenge_start__") && lower.contains("__challenge_config__"))
+            return "CHALLENGE_PAGE";
+        // Baidu can answer a search request with HTTP 200 and an anti-bot page.
+        // Keep this host-specific to avoid treating a novel about verification as a challenge.
+        try {
+            String host = URI.create(response.url()).getHost();
+            if (host != null && (host.equals("baidu.com") || host.endsWith(".baidu.com"))
+                    && org.jsoup.Jsoup.parse(body).title().contains("百度安全验证")) return "CHALLENGE_PAGE";
+        } catch (IllegalArgumentException ignored) { /* Invalid URLs fail in the transport. */ }
         if (loginLandingPage(response.url(), body)) return "LOGIN_REQUIRED";
         if (lower.contains("<title>提示信息</title>") && body.contains("所访问的页面不存在"))
             return "PAGE_NOT_FOUND";

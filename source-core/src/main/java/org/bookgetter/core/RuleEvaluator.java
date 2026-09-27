@@ -28,20 +28,22 @@ public final class RuleEvaluator {
     private static final Pattern JSON_INNER = Pattern.compile("\\{(\\$\\.[^{}]+)\\}");
     private static final Pattern BRACKET_INDEX = Pattern.compile("^(.*?)(!)?\\[([\\d\\s,:-]+)\\]$");
     private final ScriptRuntime script;
-    private final Map<String, Map<String, String>> variables = new ConcurrentHashMap<>();
-    private final ThreadLocal<String> scope = new ThreadLocal<>();
+    private record ScopeKey(String sourceId, String bookUrl) {}
+    private final Map<ScopeKey, Map<String, String>> variables = new ConcurrentHashMap<>();
+    private final ThreadLocal<ScopeKey> scope = new ThreadLocal<>();
     private final ThreadLocal<Map<String, String>> searchItemVariables = new ThreadLocal<>();
     public RuleEvaluator(ScriptRuntime script) { this.script = script; }
 
-    public void enterBook(String bookUrl) { enterBook(bookUrl, Map.of()); }
-    public void enterBook(String bookUrl, Map<String, String> inherited) {
-        scope.set(bookUrl);
+    public void enterBook(Source source, String bookUrl, Map<String, String> inherited) {
+        // Multiple imported sources may use the same detail URL but carry different rule variables.
+        ScopeKey key = new ScopeKey(source.id(), bookUrl);
+        scope.set(key);
         if (inherited != null && !inherited.isEmpty())
-            variables.computeIfAbsent(bookUrl, ignored -> new ConcurrentHashMap<>()).putAll(inherited);
+            variables.computeIfAbsent(key, ignored -> new ConcurrentHashMap<>()).putAll(inherited);
     }
     public void leaveBook() { scope.remove(); }
-    public Map<String, String> bookVariables(String bookUrl) {
-        Map<String, String> current = variables.get(bookUrl);
+    public Map<String, String> bookVariables(Source source, String bookUrl) {
+        Map<String, String> current = variables.get(new ScopeKey(source.id(), bookUrl));
         return current == null ? Map.of() : Map.copyOf(current);
     }
     public void enterSearchItem() { searchItemVariables.set(new java.util.LinkedHashMap<>()); }
@@ -69,7 +71,7 @@ public final class RuleEvaluator {
     private Map<String, String> variables(Source source) {
         Map<String, String> item = searchItemVariables.get();
         if (item != null) return item;
-        return variables.computeIfAbsent(scope.get() == null ? source.id() : scope.get(),
+        return variables.computeIfAbsent(scope.get() == null ? new ScopeKey(source.id(), "") : scope.get(),
                 ignored -> new ConcurrentHashMap<>());
     }
 
@@ -173,6 +175,7 @@ public final class RuleEvaluator {
         String value = rule.trim();
         if (!value.startsWith("@js:") && !value.startsWith("<js>")) {
             value = expandGets(value, source);
+            if (value.isBlank()) return "";
             Matcher put = PUT.matcher(value);
             if (put.find()) {
                 String assignmentsRule = put.group(1);

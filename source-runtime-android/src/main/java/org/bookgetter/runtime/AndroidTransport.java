@@ -10,61 +10,45 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceResponse;
 import java.io.IOException;
-import java.nio.charset.Charset;
-import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Pattern;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.RequestBody;
-import okhttp3.Response;
 import org.bookgetter.core.Models.*;
 import org.bookgetter.core.Transport;
+import org.bookgetter.core.WebContentTransport;
+import org.bookgetter.core.ResponseSignals;
 
 /** HTTP and WebView share Android's per-domain CookieManager. Call on a worker thread. */
-public final class AndroidTransport implements Transport {
+public final class AndroidTransport implements WebContentTransport {
     private final Context context;
-    private final OkHttpClient client = new OkHttpClient.Builder().cookieJar(new SharedCookieJar()).followRedirects(true).build();
+    private final HttpSourceTransport http = new HttpSourceTransport(
+            new OkHttpClient.Builder().cookieJar(new SharedCookieJar()).build());
     private final CookieManager cookies = CookieManager.getInstance();
     public AndroidTransport(Context context) { this.context = context.getApplicationContext(); cookies.setAcceptCookie(true); }
 
     @Override public FetchResponse fetch(FetchRequest request) throws Exception {
         if (Looper.myLooper() == Looper.getMainLooper()) throw new IllegalStateException("Network fetch must run off the main thread");
-        return request.webView() ? fetchWebView(request) : fetchHttp(request);
+        return request.webView() ? fetchWebView(request) : http.fetch(request);
     }
 
-    private FetchResponse fetchHttp(FetchRequest input) throws IOException {
-        Request.Builder builder = new Request.Builder().url(input.url());
-        for (Map.Entry<String, String> header : input.headers().entrySet()) builder.header(header.getKey(), header.getValue());
-        String contentType = "text/plain; charset=utf-8";
-        for (Map.Entry<String, String> header : input.headers().entrySet())
-            if (header.getKey().equalsIgnoreCase("Content-Type")) contentType = header.getValue();
-        RequestBody body = input.body() == null
-                ? (input.method().equalsIgnoreCase("POST") || input.method().equalsIgnoreCase("PUT") || input.method().equalsIgnoreCase("PATCH")
-                    ? RequestBody.create(MediaType.parse(contentType), new byte[0]) : null)
-                : RequestBody.create(MediaType.parse(contentType), input.body());
-        builder.method(input.method(), body);
-        OkHttpClient requestClient = input.followRedirects() ? client
-                : client.newBuilder().followRedirects(false).followSslRedirects(false).build();
-        try (Response response = requestClient.newCall(builder.build()).execute()) {
-            String finalUrl = response.request().url().toString();
-            Charset charset = input.charset() != null ? Charset.forName(input.charset())
-                    : response.body() != null && response.body().contentType() != null
-                        ? response.body().contentType().charset(java.nio.charset.StandardCharsets.UTF_8)
-                        : java.nio.charset.StandardCharsets.UTF_8;
-            String text = response.body() == null ? "" : new String(response.body().bytes(), charset);
-            Map<String, String> headers = new LinkedHashMap<>();
-            for (String name : response.headers().names()) headers.put(name, response.header(name));
-            return new FetchResponse(finalUrl, text, response.code(), headers);
-        }
+    @Override public FetchResponse fetchContent(FetchRequest request, String sourceRegex, String webJs) throws Exception {
+        if (Looper.myLooper() == Looper.getMainLooper()) throw new IllegalStateException("Network fetch must run off the main thread");
+        return fetchWebView(request, sourceRegex, webJs);
     }
 
     private FetchResponse fetchWebView(FetchRequest request) throws Exception {
+        return fetchWebView(request, null, null);
+    }
+
+    private FetchResponse fetchWebView(FetchRequest request, String sourceRegex, String webJs) throws Exception {
         if (!request.method().equals("GET")) throw new IllegalArgumentException("WebView transport supports GET only");
+        Pattern resourcePattern = sourceRegex == null || sourceRegex.isBlank() ? null : Pattern.compile(sourceRegex);
         CountDownLatch done = new CountDownLatch(1);
+        AtomicBoolean completed = new AtomicBoolean();
         AtomicReference<FetchResponse> result = new AtomicReference<>();
         AtomicReference<Exception> error = new AtomicReference<>();
         AtomicReference<WebView> viewRef = new AtomicReference<>();
@@ -72,6 +56,8 @@ public final class AndroidTransport implements Transport {
         AtomicReference<Runnable> pendingRead = new AtomicReference<>();
         mainHandler.post(() -> {
             try {
+                // The worker may have timed out before this main-thread creation callback runs.
+                if (completed.get()) return;
                 WebView view = new WebView(context);
                 viewRef.set(view);
                 view.getSettings().setJavaScriptEnabled(true);
@@ -83,14 +69,27 @@ public final class AndroidTransport implements Transport {
                     if (previous != null) mainHandler.removeCallbacks(previous);
                     Runnable read = () -> {
                         try {
-                            webView.evaluateJavascript("document.documentElement.outerHTML", html -> {
+                            if (completed.get()) return;
+                            if (resourcePattern != null) {
+                                // A sniffing request completes only when a matching resource is observed.
+                                if (webJs != null && !webJs.isBlank()) webView.evaluateJavascript(webJs, ignored -> {});
+                                return;
+                            }
+                            String expression = webJs == null || webJs.isBlank() ? "document.documentElement.outerHTML" : webJs;
+                            webView.evaluateJavascript(expression, html -> {
                                 try {
                                     String decoded = new com.google.gson.Gson().fromJson(html, String.class);
-                                    result.set(new FetchResponse(url, decoded == null ? "" : decoded, 200, Map.of()));
-                                } catch (Exception e) { error.set(e); }
+                                    if (completed.compareAndSet(false, true))
+                                        result.set(new FetchResponse(url, decoded == null ? "" : decoded, 200, Map.of()));
+                                } catch (Exception e) {
+                                    if (completed.compareAndSet(false, true)) error.set(e);
+                                }
                                 done.countDown();
                             });
-                        } catch (Exception e) { error.set(e); done.countDown(); }
+                        } catch (Exception e) {
+                            if (completed.compareAndSet(false, true)) error.set(e);
+                            done.countDown();
+                        }
                     };
                     pendingRead.set(read);
                     // Legado BackstageWebView defaults to 100 + 900 ms without webJs.
@@ -98,23 +97,45 @@ public final class AndroidTransport implements Transport {
                     mainHandler.postDelayed(read, delay);
                 }
                 @Override public void onReceivedError(WebView webView, WebResourceRequest req, WebResourceError webError) {
-                    if (req.isForMainFrame()) { error.set(new IOException(webError.getDescription().toString())); done.countDown(); }
+                    if (req.isForMainFrame() && completed.compareAndSet(false, true)) {
+                        error.set(new IOException(webError.getDescription().toString())); done.countDown();
+                    }
                 }
                 @Override public void onReceivedHttpError(WebView webView, WebResourceRequest req, WebResourceResponse response) {
-                    if (req.isForMainFrame()) { error.set(new IOException("HTTP " + response.getStatusCode() + " at " + req.getUrl())); done.countDown(); }
+                    if (req.isForMainFrame() && completed.compareAndSet(false, true)) {
+                        error.set(new WebContentTransport.HttpStatusException(
+                                response.getStatusCode(), req.getUrl().toString())); done.countDown();
+                    }
+                }
+                @Override public void onLoadResource(WebView webView, String resourceUrl) {
+                    if (resourcePattern != null && resourcePattern.matcher(resourceUrl).matches()
+                            && completed.compareAndSet(false, true)) {
+                        // Legado's sourceRegex captures the resource URL requested by the page.
+                        result.set(new FetchResponse(webView.getUrl(), resourceUrl, 200, Map.of()));
+                        done.countDown();
+                    }
                 }
                 });
                 view.loadUrl(request.url(), request.headers());
-            } catch (Exception e) { error.set(e); done.countDown(); }
+            } catch (Exception e) {
+                if (completed.compareAndSet(false, true)) error.set(e);
+                done.countDown();
+            }
         });
         boolean finished;
         try { finished = done.await(45, TimeUnit.SECONDS); }
-        finally { mainHandler.post(() -> {
-            if (pendingRead.get() != null) mainHandler.removeCallbacks(pendingRead.get());
-            if (viewRef.get() != null) viewRef.get().destroy();
-        }); }
-        if (!finished) throw new IOException("WebView timeout: " + request.url());
+        finally {
+            // Close the gate on the worker before posting cleanup; main-thread creation may still be queued.
+            completed.set(true);
+            mainHandler.post(() -> {
+                if (pendingRead.get() != null) mainHandler.removeCallbacks(pendingRead.get());
+                if (viewRef.get() != null) viewRef.get().destroy();
+            });
+        }
+        if (!finished && resourcePattern != null) throw new WebContentTransport.NoMatchingResourceException();
+        if (!finished) throw new IOException("WebView timeout: " + ResponseSignals.urlForLog(request.url()));
         if (error.get() != null) throw error.get();
+        if (result.get() == null) throw new IOException("WebView completed without a response");
         return result.get();
     }
 }

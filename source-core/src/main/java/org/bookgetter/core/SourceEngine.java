@@ -4,7 +4,6 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -20,18 +19,24 @@ import org.jsoup.nodes.Element;
 
 /** Stateless capture pipeline; callers own persistence, scheduling and user interaction. */
 public final class SourceEngine {
+    private static final int MAX_PAGES = 50;
     private final Transport transport;
     private final ScriptRuntime scripts;
     private final RequestPlanner requests;
     private final RuleEvaluator rules;
     private final Consumer<Diagnostic> diagnostics;
+    private final Consumer<StageTrace> traces;
 
     public SourceEngine(Transport transport) { this(transport, new RhinoRuntime(transport)); }
     public SourceEngine(Transport transport, ScriptRuntime scripts) {
         this(transport, scripts, ignored -> {});
     }
     public SourceEngine(Transport transport, ScriptRuntime scripts, Consumer<Diagnostic> diagnostics) {
-        this.transport = transport; this.scripts = scripts; this.diagnostics = diagnostics;
+        this(transport, scripts, diagnostics, ignored -> {});
+    }
+    public SourceEngine(Transport transport, ScriptRuntime scripts, Consumer<Diagnostic> diagnostics,
+                        Consumer<StageTrace> traces) {
+        this.transport = transport; this.scripts = scripts; this.diagnostics = diagnostics; this.traces = traces;
         requests = new RequestPlanner(scripts); rules = new RuleEvaluator(scripts);
     }
 
@@ -52,10 +57,11 @@ public final class SourceEngine {
         try {
             if (source.isJsSource()) return jsSearch(source, keyword, page);
             FetchResponse response;
-            try { response = fetch(requests.plan(source.string("searchUrl"), source, keyword, page, source.id())); }
+            try { response = fetch(plan(source.string("searchUrl"), source, keyword, page, source.id(),
+                            Stage.SEARCH, "searchUrl"),
+                    Stage.SEARCH, source.id(), "searchUrl"); }
             catch (SourceFailure e) { throw e; }
             catch (Exception e) { throw new SourceFailure(Stage.SEARCH, source.id(), "searchUrl", e.getMessage(), e); }
-            rejectUnusableResponse(response, Stage.SEARCH, source.id(), "searchUrl");
             String bookUrlPattern = source.string("bookUrlPattern");
             if (bookUrlPattern != null && !bookUrlPattern.isEmpty()) {
                 try {
@@ -77,31 +83,89 @@ public final class SourceEngine {
                         Severity.INFO, "ruleSearch.bookList"));
                 return directDetailSearch(source, response);
             }
-            List<BookHit> hits = new ArrayList<>();
-            for (Object item : items) {
-                rules.enterSearchItem();
-                try {
-                    String name = field(source, "ruleSearch", "name", item, response.url(), false);
-                    String url = field(source, "ruleSearch", "bookUrl", item, response.url(), true);
-                    if (name.isBlank() || url.isBlank()) continue;
-                    String author = field(source, "ruleSearch", "author", item, response.url(), false);
-                    String intro = optionalField(source, "ruleSearch", "intro", item, response.url(), false);
-                    String cover = optionalField(source, "ruleSearch", "coverUrl", item, response.url(), true);
-                    String genre = optionalField(source, "ruleSearch", "kind", item, response.url(), false);
-                    String wordCount = optionalField(source, "ruleSearch", "wordCount", item, response.url(), false);
-                    String lastChapter = optionalField(source, "ruleSearch", "lastChapter", item, response.url(), false);
-                    hits.add(new BookHit(source.id(), url, name, author, intro, cover, source.kind(),
-                            genre, wordCount, lastChapter, rules.searchItemVariables()));
-                } finally { rules.leaveSearchItem(); }
-            }
-            return hits;
+            return parseHits(source, "ruleSearch", items, response.url());
         } catch (SourceFailure e) { throw e; }
         catch (Exception e) { throw new SourceFailure(Stage.SEARCH, source.id(), "ruleSearch", e.getMessage(), e); }
     }
 
+    /** Resolve the source's discoverable categories before fetching a selected category. */
+    public List<ExploreEntry> exploreEntries(Source source) {
+        String raw = source.string("exploreUrl");
+        if (raw == null || raw.isBlank()) return List.of();
+        try {
+            String value = raw.trim();
+            if (value.startsWith("@js:")) value = String.valueOf(scripts.evaluate(value.substring(4), Map.of(), source));
+            else if (value.startsWith("<js>") && value.endsWith("</js>"))
+                value = String.valueOf(scripts.evaluate(value.substring(4, value.length() - 5), Map.of(), source));
+            List<ExploreEntry> entries = new ArrayList<>();
+            if (value.startsWith("[")) {
+                for (JsonElement item : JsonParser.parseString(value).getAsJsonArray()) {
+                    JsonObject object = item.getAsJsonObject();
+                    String type = string(object, "type");
+                    if (!type.isBlank() && !type.equals("url"))
+                        throw new SourceFailure(Stage.SEARCH, source.id(), "exploreUrl", "UNSUPPORTED_EXPLORE_FILTER",
+                                "Discovery category requires the exploreScreen filter UI: " + type);
+                    String url = string(object, "url");
+                    if (!url.isBlank()) entries.add(new ExploreEntry(orDefault(string(object, "title"), url), url));
+                }
+            } else {
+                for (String part : value.split("&&|\\r?\\n")) {
+                    String item = part.trim();
+                    if (item.isEmpty()) continue;
+                    int separator = item.indexOf("::");
+                    if (separator < 0)
+                        throw new SourceFailure(Stage.SEARCH, source.id(), "exploreUrl", "MISSING_EXPLORE_URL",
+                                "Discovery category has no URL: " + item);
+                    entries.add(new ExploreEntry(item.substring(0, separator).trim(), item.substring(separator + 2).trim()));
+                }
+            }
+            return entries;
+        } catch (SourceFailure e) { throw e; }
+        catch (Exception e) {
+            throw new SourceFailure(Stage.SEARCH, source.id(), "exploreUrl", "INVALID_EXPLORE",
+                    "Cannot parse discovery categories: " + e.getMessage(), e);
+        }
+    }
+
+    public List<BookHit> explore(Source source, ExploreEntry entry, int page) {
+        try {
+            if (source.isJsSource()) return jsHits(source, "explore", Map.of("url", entry.url(), "page", page));
+            FetchResponse response = fetch(plan(entry.url(), source, "", page, source.id(),
+                            Stage.SEARCH, "exploreUrl"),
+                    Stage.SEARCH, source.id(), "exploreUrl");
+            String section = source.rule("ruleExplore", "bookList") == null ? "ruleSearch" : "ruleExplore";
+            List<Object> items = listItems(source.rule(section, "bookList"), response.body(), response.url(), source);
+            if (items.isEmpty()) return directDetailSearch(source, response);
+            return parseHits(source, section, items, response.url());
+        } catch (SourceFailure e) { throw e; }
+        catch (Exception e) { throw new SourceFailure(Stage.SEARCH, source.id(), "ruleExplore", e.getMessage(), e); }
+    }
+
+    private List<BookHit> parseHits(Source source, String section, List<Object> items, String baseUrl) {
+        List<BookHit> hits = new ArrayList<>();
+        for (Object item : items) {
+            rules.enterSearchItem();
+            try {
+                String name = field(source, section, "name", item, baseUrl, false);
+                String url = field(source, section, "bookUrl", item, baseUrl, true);
+                if (name.isBlank() || url.isBlank()) continue;
+                String author = field(source, section, "author", item, baseUrl, false);
+                String intro = optionalField(source, section, "intro", item, baseUrl, false);
+                String cover = optionalField(source, section, "coverUrl", item, baseUrl, true);
+                String genre = optionalField(source, section, "kind", item, baseUrl, false);
+                String wordCount = optionalField(source, section, "wordCount", item, baseUrl, false);
+                String lastChapter = optionalField(source, section, "lastChapter", item, baseUrl, false);
+                hits.add(new BookHit(source.id(), url, name, author, intro, cover, source.kind(),
+                        genre, wordCount, lastChapter, rules.searchItemVariables()));
+            } finally { rules.leaveSearchItem(); }
+        }
+        return hits;
+    }
+
     /** Legado treats a matching final search URL, or an empty list without a pattern, as a detail page. */
     private List<BookHit> directDetailSearch(Source source, FetchResponse response) {
-        rules.enterBook(response.url(), Map.of());
+        rules.enterBook(source, response.url(), Map.of());
+        scripts.enterBook(Map.of("bookUrl", response.url()));
         try {
             Object detail = response.body();
             String init = source.rule("ruleBookInfo", "init");
@@ -120,19 +184,21 @@ public final class SourceEngine {
             String wordCount = optionalField(source, "ruleBookInfo", "wordCount", detail, response.url(), false);
             String lastChapter = optionalField(source, "ruleBookInfo", "lastChapter", detail, response.url(), false);
             return List.of(new BookHit(source.id(), response.url(), name, author, intro, cover,
-                    source.kind(), genre, wordCount, lastChapter, rules.bookVariables(response.url())));
+                    source.kind(), genre, wordCount, lastChapter, bookVariables(source, response.url())));
         } catch (SourceFailure e) {
             throw new SourceFailure(Stage.SEARCH, source.id(), e.field, e.getMessage(), e);
-        } finally { rules.leaveBook(); }
+        } finally { scripts.leaveBook(); rules.leaveBook(); }
     }
 
     public BookDetail detail(Source source, BookHit hit) {
-        requireIdentity(source, hit.sourceId());
-        rules.enterBook(hit.url(), hit.variables());
+        requireIdentity(source, hit.sourceId(), Stage.DETAIL);
+        rules.enterBook(source, hit.url(), hit.variables());
+        scripts.enterBook(jsBook(new BookDetail(hit, hit.url(), List.of())));
         try {
             if (source.isJsSource()) return jsDetail(source, hit);
-            FetchResponse response = fetch(requests.plan(hit.url(), source, "", 1, source.id()));
-            rejectUnusableResponse(response, Stage.DETAIL, source.id(), "ruleBookInfo.init");
+            FetchResponse response = fetch(plan(hit.url(), source, "", 1, source.id(),
+                            Stage.DETAIL, "ruleBookInfo.init"),
+                    Stage.DETAIL, source.id(), "ruleBookInfo.init");
             Object detailContent = response.body();
             String init = source.rule("ruleBookInfo", "init");
             if (init != null && !init.isBlank()) {
@@ -155,32 +221,41 @@ public final class SourceEngine {
             String download = "";
             if (source.rule("ruleBookInfo", "downloadUrls") != null) {
                 try { download = field(source, "ruleBookInfo", "downloadUrls", detailContent, response.url(), true); }
-                catch (SourceFailure ignored) { /* no direct-download links for this item */ }
+                catch (SourceFailure e) {
+                    diagnostics.accept(new Diagnostic(Stage.DETAIL, "OPTIONAL_FIELD_ERROR", e.getMessage(),
+                            Severity.WARNING, "ruleBookInfo.downloadUrls"));
+                }
             }
             BookHit enriched = new BookHit(hit.sourceId(), hit.url(), name.isBlank() ? hit.name() : name,
                     author.isBlank() ? hit.author() : author, intro.isBlank() ? hit.intro() : intro,
                     cover.isBlank() ? hit.coverUrl() : cover, hit.kind(),
                     genre.isBlank() ? hit.genre() : genre,
                     wordCount.isBlank() ? hit.wordCount() : wordCount,
-                    lastChapter.isBlank() ? hit.lastChapter() : lastChapter, rules.bookVariables(hit.url()));
+                    lastChapter.isBlank() ? hit.lastChapter() : lastChapter, bookVariables(source, hit.url()));
             return new BookDetail(enriched, toc, download.isBlank() ? List.of() : List.of(download.split("\\s+")));
         } catch (SourceFailure e) { throw e; }
         catch (Exception e) { throw new SourceFailure(Stage.DETAIL, source.id(), "ruleBookInfo", e.getMessage(), e); }
-        finally { rules.leaveBook(); }
+        finally { scripts.leaveBook(); rules.leaveBook(); }
     }
 
     public List<Chapter> chapters(Source source, BookDetail book) {
-        requireIdentity(source, book.hit().sourceId());
+        requireIdentity(source, book.hit().sourceId(), Stage.CATALOG);
         if (source.kind() == Kind.FILE) return List.of();
-        rules.enterBook(book.hit().url(), book.hit().variables());
+        rules.enterBook(source, book.hit().url(), book.hit().variables());
+        scripts.enterBook(jsBook(book));
         try {
             if (source.isJsSource()) return jsChapters(source, book);
             List<Chapter> chapters = new ArrayList<>();
             Set<String> visited = new HashSet<>();
+            Set<String> finalUrls = new HashSet<>();
             Set<String> chapterUrls = new HashSet<>();
             String page = book.tocUrl();
-            while (page != null && !page.isBlank() && visited.add(page) && visited.size() <= 50) {
-                FetchResponse response = fetch(requests.plan(page, source, "", 1, book.hit().url()));
+            while (page != null && !page.isBlank()) {
+                checkPage(visited, page, Stage.CATALOG, source.id(), "ruleToc.nextTocUrl");
+                FetchResponse response = fetch(plan(page, source, "", 1, book.hit().url(),
+                                Stage.CATALOG, "ruleToc.nextTocUrl"),
+                        Stage.CATALOG, source.id(), "ruleToc.chapterList");
+                checkFinalPage(finalUrls, response.url(), Stage.CATALOG, source.id(), "ruleToc.nextTocUrl");
                 for (Object item : listItems(source.rule("ruleToc", "chapterList"), response.body(), response.url(), source)) {
                     String title = field(source, "ruleToc", "chapterName", item, response.url(), false);
                     String url = field(source, "ruleToc", "chapterUrl", item, response.url(), true);
@@ -195,10 +270,18 @@ public final class SourceEngine {
                 page = field(source, "ruleToc", "nextTocUrl", response.body(), response.url(), true);
             }
             if (chapters.isEmpty()) throw new SourceFailure(Stage.CATALOG, source.id(), "ruleToc.chapterList", "No chapters matched");
-            return chapters;
+            if (!"true".equals(book.hit().variables().get("__bookgetter.reverseToc"))) return chapters;
+            // A source may request the opposite catalog direction through Book.setReverseToc.
+            List<Chapter> reversed = new ArrayList<>();
+            for (int index = chapters.size() - 1; index >= 0; index--) {
+                Chapter item = chapters.get(index);
+                reversed.add(new Chapter(item.bookUrl(), item.url(), item.title(), reversed.size(),
+                        item.volume(), item.vip(), item.isPay()));
+            }
+            return reversed;
         } catch (SourceFailure e) { throw e; }
         catch (Exception e) { throw new SourceFailure(Stage.CATALOG, source.id(), "ruleToc", e.getMessage(), e); }
-        finally { rules.leaveBook(); }
+        finally { scripts.leaveBook(); rules.leaveBook(); }
     }
 
     public ChapterContent content(Source source, BookDetail book, Chapter chapter) {
@@ -220,8 +303,12 @@ public final class SourceEngine {
 
     /** Pass the catalog's following chapter URL so pagination cannot absorb that chapter. */
     public ChapterContent content(Source source, BookDetail book, Chapter chapter, String nextChapterUrl) {
-        requireIdentity(source, book.hit().sourceId());
-        rules.enterBook(book.hit().url(), book.hit().variables());
+        requireIdentity(source, book.hit().sourceId(), Stage.CONTENT);
+        if (chapter == null || book.hit().url() == null || !book.hit().url().equals(chapter.bookUrl()))
+            throw new SourceFailure(Stage.CONTENT, source.id(), "chapter.bookUrl", "CHAPTER_BOOK_MISMATCH",
+                    "Chapter belongs to another book");
+        rules.enterBook(source, book.hit().url(), book.hit().variables());
+        scripts.enterBook(jsBook(book));
         try {
             String text;
             if (source.isJsSource()) {
@@ -235,11 +322,20 @@ public final class SourceEngine {
                 StringBuilder joined = new StringBuilder();
                 String page = chapter.url();
                 Set<String> visited = new HashSet<>();
-                while (page != null && !page.isBlank() && visited.add(page) && visited.size() <= 50) {
-                    FetchResponse response = fetch(requests.plan(page, source, "", 1, book.tocUrl()));
-                    if (ResponseSignals.quality(response).equals("APP_UPGRADE_REQUIRED"))
-                        throw new SourceFailure(Stage.CONTENT, source.id(), "ruleContent.content",
-                                "Source requires an app upgrade; response is not chapter text");
+                Set<String> finalUrls = new HashSet<>();
+                while (page != null && !page.isBlank()) {
+                    checkPage(visited, page, Stage.CONTENT, source.id(), "ruleContent.nextContentUrl");
+                    FetchRequest request = plan(page, source, "", 1, book.tocUrl(),
+                            Stage.CONTENT, "ruleContent.nextContentUrl");
+                    FetchResponse response = fetchContent(request, source, visited.size() == 1);
+                    // Even the first request may redirect to the following chapter. A book page
+                    // can legitimately be the initial content URL, so only reject it on later pages.
+                    if (response.url().equals(nextChapterUrl)
+                            || visited.size() > 1 && (response.url().equals(book.hit().url())
+                            || response.url().equals(book.tocUrl())))
+                        throw new SourceFailure(Stage.CONTENT, source.id(), "ruleContent.nextContentUrl",
+                                "PAGINATION_BOUNDARY", "Pagination redirected to a chapter or catalog boundary");
+                    checkFinalPage(finalUrls, response.url(), Stage.CONTENT, source.id(), "ruleContent.nextContentUrl");
                     String value = field(source, "ruleContent", "content", response.body(), response.url(), false);
                     if (invalidContent(value)) throw new SourceFailure(Stage.CONTENT, source.id(), "ruleContent.content", "Empty page content");
                     if (joined.length() > 0) joined.append('\n');
@@ -265,31 +361,41 @@ public final class SourceEngine {
             if (source.kind() == Kind.TEXT) return new ChapterContent(chapter, Kind.TEXT, text, List.of());
             List<Resource> resources = new ArrayList<>();
             if (source.kind() == Kind.IMAGE) {
-                for (Element image : Jsoup.parse(text, chapter.url()).select("img[src]")) {
-                    String link = image.absUrl("src");
-                    if (httpResource(link)) resources.add(new Resource(link, image.attr("alt"), "image/*"));
+                for (Element image : Jsoup.parse(text, chapter.url()).select("img")) {
+                    // Lazy readers keep the usable image URL in a data attribute while
+                    // src points to a blob or placeholder that cannot be downloaded.
+                    String link = "";
+                    for (String attribute : List.of("data-original", "data-src", "data-lazy-src", "src")) {
+                        String candidate = image.absUrl(attribute);
+                        if (ResourceUrls.isHttp(candidate)) { link = candidate; break; }
+                    }
+                    if (ResourceUrls.isHttp(link)) resources.add(new Resource(link, image.attr("alt"), "image/*"));
                 }
                 if (resources.isEmpty()) throw new SourceFailure(Stage.CONTENT, source.id(), "ruleContent.content",
                         "No valid image resources found");
             } else {
                 String link = RuleEvaluator.absolute(chapter.url(), text.trim());
-                if (!httpResource(link)) {
+                if (!ResourceUrls.isHttp(link)) {
                     String sourceRegex = source.rule("ruleContent", "sourceRegex");
                     String field = sourceRegex == null || sourceRegex.isBlank()
                             ? "ruleContent.content" : "ruleContent.sourceRegex";
                     throw new SourceFailure(Stage.CONTENT, source.id(), field,
-                            "No valid media URL; WebView resource sniffing is not implemented");
+                            "No valid media URL was extracted");
                 }
                 resources.add(new Resource(link, chapter.title(), null));
             }
             return new ChapterContent(chapter, source.kind(), null, resources);
         } catch (SourceFailure e) { throw e; }
         catch (Exception e) { throw new SourceFailure(Stage.CONTENT, source.id(), "ruleContent", e.getMessage(), e); }
-        finally { rules.leaveBook(); }
+        finally { scripts.leaveBook(); rules.leaveBook(); }
     }
 
     private List<BookHit> jsSearch(Source source, String keyword, int page) {
-        JsonArray array = jsonArray(scripts.call(source.string("mainJs"), "search", Map.of("key", keyword, "page", page), source));
+        return jsHits(source, "search", Map.of("key", keyword, "page", page));
+    }
+
+    private List<BookHit> jsHits(Source source, String function, Map<String, Object> args) {
+        JsonArray array = jsonArray(scripts.call(source.string("mainJs"), function, args, source));
         List<BookHit> result = new ArrayList<>();
         for (JsonElement item : array) {
             if (!item.isJsonObject()) continue;
@@ -350,13 +456,6 @@ public final class SourceEngine {
         return value.isEmpty() || value.equalsIgnoreCase("null") || value.equalsIgnoreCase("undefined")
                 || (value.startsWith("当前版本过低") && value.contains("请升级到最新版"));
     }
-    private static boolean httpResource(String link) {
-        try {
-            URI uri = URI.create(link);
-            return (uri.getScheme().equalsIgnoreCase("https") || uri.getScheme().equalsIgnoreCase("http"))
-                    && uri.getHost() != null && !uri.getHost().isBlank();
-        } catch (Exception ignored) { return false; }
-    }
     private static String absoluteIfPresent(String base, String value) {
         return value.isBlank() ? "" : RuleEvaluator.absolute(base, value);
     }
@@ -376,15 +475,89 @@ public final class SourceEngine {
         }
     }
 
-    private FetchResponse fetch(FetchRequest request) throws Exception {
-        FetchResponse response = transport.fetch(request);
-        if (response.status() >= 300 && response.status() < 400)
-            throw new IllegalStateException("Unresolved HTTP redirect " + response.status() + " at "
-                    + ResponseSignals.urlForLog(request.url()));
-        if (response.status() >= 400)
-            throw new IllegalStateException("HTTP " + response.status() + " at "
-                    + ResponseSignals.urlForLog(request.url()));
+    private FetchRequest plan(String template, Source source, String key, int page, String base,
+                              Stage stage, String field) {
+        try { return requests.plan(template, source, key, page, base); }
+        catch (Exception e) {
+            throw new SourceFailure(stage, source.id(), field, "REQUEST_PLAN_ERROR",
+                    "Cannot plan request (" + e.getClass().getSimpleName() + ")", e);
+        }
+    }
+
+    private FetchResponse fetch(FetchRequest request, Stage stage, String sourceId, String field) {
+        FetchResponse response;
+        try { response = transport.fetch(request); }
+        catch (WebContentTransport.HttpStatusException e) {
+            throw browserStatusFailure(request, stage, sourceId, field, e);
+        }
+        catch (Exception e) {
+            throw new SourceFailure(stage, sourceId, field, "REQUEST_ERROR",
+                    "Request failed at " + ResponseSignals.urlForLog(request.url())
+                            + " (" + e.getClass().getSimpleName() + ")", e);
+        }
+        trace(request, response, stage, sourceId, field);
+        validateResponse(response, request, stage, sourceId, field);
         return response;
+    }
+
+    private static void validateResponse(FetchResponse response, FetchRequest request,
+                                         Stage stage, String sourceId, String field) {
+        if (response.status() >= 300 && response.status() < 400)
+            throw new SourceFailure(stage, sourceId, field, "UNRESOLVED_REDIRECT",
+                    "Unresolved HTTP redirect " + response.status() + " at " + ResponseSignals.urlForLog(request.url()));
+        if (response.status() >= 400)
+            throw new SourceFailure(stage, sourceId, field,
+                    response.status() == 401 || response.status() == 403 ? "ACCESS_DENIED" : "HTTP_ERROR",
+                    "HTTP " + response.status() + " at " + ResponseSignals.urlForLog(request.url()));
+        rejectUnusableResponse(response, stage, sourceId, field);
+    }
+
+    private FetchResponse fetchContent(FetchRequest request, Source source, boolean firstPage) {
+        // Legado only sniffs resources on the initial chapter request; later pages may still run webJs.
+        String sourceRegex = firstPage ? source.rule("ruleContent", "sourceRegex") : null;
+        String webJs = source.rule("ruleContent", "webJs");
+        String browserField = sourceRegex != null && !sourceRegex.isBlank()
+                ? "ruleContent.sourceRegex" : "ruleContent.webJs";
+        if ((sourceRegex == null || sourceRegex.isBlank()) && (webJs == null || webJs.isBlank()))
+            return fetch(request, Stage.CONTENT, source.id(), "ruleContent.content");
+        if (!(transport instanceof WebContentTransport browser))
+            throw new SourceFailure(Stage.CONTENT, source.id(),
+                    browserField,
+                    "UNSUPPORTED", "Content rule requires a browser transport");
+        try {
+            FetchResponse response = browser.fetchContent(request, sourceRegex, webJs);
+            trace(request, response, Stage.CONTENT, source.id(), "ruleContent.content");
+            validateResponse(response, request, Stage.CONTENT, source.id(), "ruleContent.content");
+            return response;
+        } catch (SourceFailure e) { throw e; }
+        catch (WebContentTransport.HttpStatusException e) {
+            throw browserStatusFailure(request, Stage.CONTENT, source.id(), browserField, e);
+        }
+        catch (WebContentTransport.NoMatchingResourceException e) {
+            throw new SourceFailure(Stage.CONTENT, source.id(), "ruleContent.sourceRegex", "SOURCE_REGEX_NO_MATCH",
+                    e.getMessage(), e);
+        }
+        catch (Exception e) {
+            throw new SourceFailure(Stage.CONTENT, source.id(), browserField, "REQUEST_ERROR",
+                    "Browser content request failed at " + ResponseSignals.urlForLog(request.url())
+                            + " (" + e.getClass().getSimpleName() + ")", e);
+        }
+    }
+
+    private void trace(FetchRequest request, FetchResponse response, Stage stage, String sourceId, String field) {
+        traces.accept(new StageTrace(stage, sourceId, field, request.method(),
+                ResponseSignals.urlForLog(request.url()), ResponseSignals.urlForLog(response.url()),
+                response.status(), ResponseSignals.quality(response)));
+    }
+
+    private SourceFailure browserStatusFailure(FetchRequest request, Stage stage, String sourceId, String field,
+                                               WebContentTransport.HttpStatusException error) {
+        FetchResponse failed = new FetchResponse(error.url(), "", error.status(), Map.of());
+        trace(request, failed, stage, sourceId, field);
+        try { validateResponse(failed, request, stage, sourceId, field); }
+        catch (SourceFailure failure) { return failure; }
+        return new SourceFailure(stage, sourceId, field, "REQUEST_ERROR",
+                "Browser reported an unexpected HTTP status " + error.status());
     }
 
     private static void rejectUnusableResponse(FetchResponse response, Stage stage, String sourceId, String field) {
@@ -394,14 +567,30 @@ public final class SourceEngine {
                 || quality.equals("CHALLENGE_PAGE") || quality.equals("PARKED_DOMAIN")
                 || quality.equals("CLIENT_SIDE_REDIRECT")
                 || quality.equals("APP_UPGRADE_REQUIRED") || quality.equals("PAGE_NOT_FOUND"))
-            throw new SourceFailure(stage, sourceId, field,
+            throw new SourceFailure(stage, sourceId, field, quality,
                     "Unusable source response: " + quality + " (HTTP " + response.status() + ")");
     }
 
-    private static void requireIdentity(Source source, String sourceId) {
-        if (!source.id().equals(sourceId)) throw new SourceFailure(Stage.DETAIL, source.id(), null, "Book belongs to another source");
+    private static void requireIdentity(Source source, String sourceId, Stage stage) {
+        if (!source.id().equals(sourceId))
+            throw new SourceFailure(stage, source.id(), "book.sourceId", "SOURCE_MISMATCH",
+                    "Book belongs to another source");
     }
-    private static Stage stage(String section) { return switch (section) { case "ruleSearch" -> Stage.SEARCH; case "ruleBookInfo" -> Stage.DETAIL; case "ruleToc" -> Stage.CATALOG; default -> Stage.CONTENT; }; }
+    private static void checkPage(Set<String> visited, String page, Stage stage, String sourceId, String field) {
+        // An incomplete catalog or chapter must never enter the cache or a successful export.
+        if (visited.contains(page))
+            throw new SourceFailure(stage, sourceId, field, "PAGINATION_CYCLE", "Pagination returned to an earlier page");
+        if (visited.size() >= MAX_PAGES)
+            throw new SourceFailure(stage, sourceId, field, "PAGINATION_LIMIT",
+                    "Pagination exceeded " + MAX_PAGES + " pages");
+        visited.add(page);
+    }
+    private static void checkFinalPage(Set<String> visited, String url, Stage stage, String sourceId, String field) {
+        if (!visited.add(url))
+            throw new SourceFailure(stage, sourceId, field, "PAGINATION_CYCLE",
+                    "Pagination redirected to an earlier page");
+    }
+    private static Stage stage(String section) { return switch (section) { case "ruleSearch", "ruleExplore" -> Stage.SEARCH; case "ruleBookInfo" -> Stage.DETAIL; case "ruleToc" -> Stage.CATALOG; default -> Stage.CONTENT; }; }
     private static JsonArray jsonArray(Object value) { return JsonParser.parseString(String.valueOf(value)).getAsJsonArray(); }
     private static JsonObject jsonObject(Object value) { return JsonParser.parseString(String.valueOf(value)).getAsJsonObject(); }
     private static String string(JsonObject object, String... keys) {
@@ -422,6 +611,15 @@ public final class SourceEngine {
         value.put("author", book.hit().author());
         value.put("intro", book.hit().intro());
         value.put("coverUrl", book.hit().coverUrl());
+        value.put("variables", book.hit().variables());
         return value;
+    }
+
+    private Map<String, String> bookVariables(Source source, String bookUrl) {
+        Map<String, String> merged = new LinkedHashMap<>(rules.bookVariables(source, bookUrl));
+        merged.putAll(scripts.bookVariables());
+        if (scripts.reverseToc()) merged.put("__bookgetter.reverseToc", "true");
+        else merged.remove("__bookgetter.reverseToc");
+        return merged;
     }
 }

@@ -36,7 +36,7 @@ public final class RequestPlanner {
             text = evaluated == null ? "" : evaluated.toString();
         }
         Charset keywordCharset = StandardCharsets.UTF_8;
-        int preliminaryOptionStart = text.indexOf(",{");
+        int preliminaryOptionStart = optionStart(text);
         if (preliminaryOptionStart >= 0) {
             try {
                 JsonObject preliminaryOptions = JsonParser.parseString(text.substring(preliminaryOptionStart + 1)).getAsJsonObject();
@@ -44,7 +44,7 @@ public final class RequestPlanner {
                 if (name != null && !name.isBlank()) keywordCharset = Charset.forName(name);
             } catch (Exception ignored) { /* The final options parse reports malformed JSON. */ }
         }
-        Matcher placeholders = Pattern.compile("\\{\\{([^{}]+)\\}\\}").matcher(text);
+        Matcher placeholders = Pattern.compile("\\{\\{(.*?)\\}\\}", Pattern.DOTALL).matcher(text);
         StringBuffer expanded = new StringBuffer();
         while (placeholders.find()) {
             String expression = placeholders.group(1).trim();
@@ -59,8 +59,8 @@ public final class RequestPlanner {
         }
         placeholders.appendTail(expanded);
         text = expanded.toString();
-        int optionStart = text.indexOf(",{");
-        String rawUrl = optionStart < 0 ? text : text.substring(0, optionStart);
+        int optionStart = optionStart(text);
+        String rawUrl = replacePageChoices(optionStart < 0 ? text : text.substring(0, optionStart), page);
         JsonObject options = optionStart < 0 ? null : JsonParser.parseString(text.substring(optionStart + 1)).getAsJsonObject();
         Map<String, String> headers = new LinkedHashMap<>();
         if (source.string("header") != null) {
@@ -86,9 +86,47 @@ public final class RequestPlanner {
         long webViewDelay = 0;
         if (options != null && options.has("webViewDelayTime"))
             webViewDelay = Math.max(0, options.get("webViewDelayTime").getAsLong());
-        return new FetchRequest(RuleEvaluator.absolute(base, rawUrl), method, headers,
+        return new FetchRequest(encodeUnsafeUrl(RuleEvaluator.absolute(base, rawUrl)), method, headers,
                 body, charsetName,
                 useWebView(options), webViewDelay);
+    }
+
+    /** Request options follow the URL; `,{` inside an embedded JS expression is URL data. */
+    private static int optionStart(String text) {
+        int embedded = 0;
+        for (int i = 0; i < text.length() - 1; i++) {
+            if (text.startsWith("{{", i)) { embedded++; i++; continue; }
+            if (embedded > 0 && text.startsWith("}}", i)) { embedded--; i++; continue; }
+            if (embedded == 0 && text.startsWith(",{", i)) return i;
+        }
+        return -1;
+    }
+
+    /** Legado's `<first,second,...>` URL syntax uses the current one-based page. */
+    private static String replacePageChoices(String text, int page) {
+        Matcher choices = Pattern.compile("<([^<>]+)>").matcher(text);
+        StringBuffer result = new StringBuffer();
+        while (choices.find()) {
+            String[] values = choices.group(1).split(",", -1);
+            choices.appendReplacement(result, Matcher.quoteReplacement(
+                    values[Math.min(Math.max(page - 1, 0), values.length - 1)].trim()));
+        }
+        choices.appendTail(result);
+        return result.toString();
+    }
+
+    /** URI consumers require UTF-8 escaping when JS returns raw Han text. */
+    private static String encodeUnsafeUrl(String raw) {
+        StringBuilder result = new StringBuilder();
+        for (int offset = 0; offset < raw.length();) {
+            int codepoint = raw.codePointAt(offset);
+            offset += Character.charCount(codepoint);
+            if (codepoint > 0x7f || Character.isWhitespace(codepoint) || codepoint < 0x20) {
+                for (byte value : new String(Character.toChars(codepoint)).getBytes(StandardCharsets.UTF_8))
+                    result.append('%').append(String.format("%02X", value & 0xff));
+            } else result.append((char) codepoint);
+        }
+        return result.toString();
     }
 
     private static String encodeForm(String body, Charset charset) {

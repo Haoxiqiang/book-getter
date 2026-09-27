@@ -28,6 +28,32 @@ final class BookExporterTest {
         assertTrue(result.contains("Hello & world"));
     }
 
+    @Test void streamingTextExportLoadsOneChapterAfterWritingThePreviousOne() throws Exception {
+        Chapter second = new Chapter(hit.url(), "https://example.test/two", "Two", 1, false, false);
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        java.util.concurrent.atomic.AtomicInteger loads = new java.util.concurrent.atomic.AtomicInteger();
+        new BookExporter().writeFrom(BookExporter.Format.TXT, book, 2, index -> {
+            loads.incrementAndGet();
+            if (index == 1) assertTrue(bytes.toString(StandardCharsets.UTF_8).contains("First body"));
+            return new ChapterContent(index == 0 ? chapter : second, Kind.TEXT,
+                    index == 0 ? "First body" : "Second body", List.of());
+        }, bytes);
+        assertEquals(2, loads.get());
+        assertTrue(bytes.toString(StandardCharsets.UTF_8).indexOf("First body")
+                < bytes.toString(StandardCharsets.UTF_8).indexOf("Second body"));
+    }
+
+    @Test void streamingExportStopsWhenCancelled() {
+        try {
+            Thread.currentThread().interrupt();
+            assertThrows(java.io.InterruptedIOException.class, () ->
+                    new BookExporter().writeFrom(BookExporter.Format.TXT, book, 1,
+                            index -> contents.get(0), new ByteArrayOutputStream()));
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
     @Test void epubHasRequiredEntriesAndMimetypeFirst() throws Exception {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         new BookExporter().write(BookExporter.Format.EPUB, book, contents, bytes);

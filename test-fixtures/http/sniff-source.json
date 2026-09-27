@@ -1,0 +1,26 @@
+[
+  {
+    "bookSourceUrl": "http://10.0.2.2:18765/sniff",
+    "bookSourceName": "Local resource sniff fixture",
+    "bookSourceType": 1,
+    "searchUrl": "/sniff-search?q={{key}}",
+    "ruleSearch": {
+      "bookList": "li.book",
+      "name": "a@text",
+      "bookUrl": "a@href"
+    },
+    "ruleBookInfo": {
+      "name": "h1@text",
+      "tocUrl": "a.toc@href"
+    },
+    "ruleToc": {
+      "chapterList": "li.chapter",
+      "chapterName": "a@text",
+      "chapterUrl": "a@href"
+    },
+    "ruleContent": {
+      "content": "@js:result",
+      "sourceRegex": ".*sniff-media\\.mp3"
+    }
+  }
+]

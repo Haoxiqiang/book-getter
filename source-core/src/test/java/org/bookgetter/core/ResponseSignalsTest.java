@@ -93,6 +93,21 @@ final class ResponseSignalsTest {
         assertEquals("UNCLASSIFIED", quality(200, "<html><title>搜索结果</title></html>"));
     }
 
+    @Test void baiduSearchChallengeIsNotParsedAsBookDetail() {
+        assertEquals("CHALLENGE_PAGE", ResponseSignals.quality(new FetchResponse(
+                "https://www.baidu.com/s?wd=book", "<html><title>百度安全验证</title><h1>请验证</h1></html>",
+                200, Map.of())));
+        assertEquals("CHALLENGE_PAGE", ResponseSignals.quality(new FetchResponse(
+                "https://wappass.baidu.com/static/captcha/tuxing_v2.html",
+                "<html><title>百度安全验证</title></html>", 200, Map.of())));
+        assertEquals("CHALLENGE_PAGE", ResponseSignals.quality(new FetchResponse(
+                "https://baike.baidu.com/item/book", "<title>百度百科</title>"
+                        + "<script>window.__PARIS_CHALLENGE_START__=1;window.__CHALLENGE_CONFIG__={};</script>",
+                200, Map.of())));
+        assertEquals("UNCLASSIFIED", ResponseSignals.quality(new FetchResponse(
+                "https://example.test/book", "<html><title>百度安全验证</title></html>", 200, Map.of())));
+    }
+
     private static String quality(int status, String body) {
         return ResponseSignals.quality(new FetchResponse("https://example.test", body, status, Map.of()));
     }

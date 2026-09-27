@@ -62,7 +62,10 @@ public final class SourceCatalogManager {
             String url = feed.get("url").getAsString();
             if (!file.matches("[a-zA-Z0-9._-]+\\.json") || !names.add(file))
                 throw new IllegalArgumentException("Invalid or duplicate feed file name: " + file);
-            if (!url.startsWith("https://")) throw new IllegalArgumentException("Expected HTTPS feed: " + url);
+            boolean httpAllowed = feed.has("allowHttp") && feed.get("allowHttp").getAsBoolean();
+            if (!(url.startsWith("https://") || httpAllowed && url.startsWith("http://")))
+                throw new IllegalArgumentException("Expected HTTPS feed or explicit allowHttp: " + url);
+            boolean rss = feed.has("model") && feed.get("model").getAsString().equals("rss");
             HttpRequest request = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(30))
                     .header("User-Agent", "BookGetterCatalog/1.0 (manual update)").GET().build();
             HttpResponse<byte[]> response = client.send(request, HttpResponse.BodyHandlers.ofByteArray());
@@ -73,8 +76,11 @@ public final class SourceCatalogManager {
             if (!root.isJsonArray()) entries.add(root);
             if (entries.isEmpty()) throw new IllegalArgumentException("Empty source file: " + file);
             for (JsonElement source : entries) {
-                sourceId(source);
-                all.add(source.deepCopy());
+                if (rss) rssSourceId(source);
+                else {
+                    sourceId(source);
+                    all.add(source.deepCopy());
+                }
             }
             Files.write(staging.resolve("raw").resolve(file), bytes);
             JsonObject item = new JsonObject();
@@ -82,6 +88,8 @@ public final class SourceCatalogManager {
             item.addProperty("url", url);
             item.addProperty("sha256", sha256(bytes));
             item.addProperty("entries", entries.size());
+            item.addProperty("model", rss ? "rss" : "book");
+            item.addProperty("importedEntries", rss ? 0 : entries.size());
             files.add(item);
             System.out.println("Downloaded " + file + ": " + entries.size() + " entries");
         }
@@ -127,7 +135,11 @@ public final class SourceCatalogManager {
             JsonArray entries = root.isJsonArray() ? root.getAsJsonArray() : new JsonArray();
             if (!root.isJsonArray()) entries.add(root);
             if (entries.size() != file.get("entries").getAsInt()) throw new IllegalStateException("Entry count changed: " + path);
-            entries.forEach(all::add);
+            boolean rss = file.has("model") && file.get("model").getAsString().equals("rss");
+            if (rss) entries.forEach(SourceCatalogManager::rssSourceId);
+            else entries.forEach(sourceEntry -> { sourceId(sourceEntry); all.add(sourceEntry); });
+            int importedCount = file.has("importedEntries") ? file.get("importedEntries").getAsInt() : entries.size();
+            if (importedCount != (rss ? 0 : entries.size())) throw new IllegalStateException("Imported entry count changed: " + path);
         }
         Merged merged = merge(all, index.getAsJsonArray("files"));
         JsonArray unique = merged.unique();
@@ -165,7 +177,7 @@ public final class SourceCatalogManager {
         int position = 0;
         for (JsonElement fileEntry : files) {
             JsonObject file = fileEntry.getAsJsonObject();
-            int count = file.get("entries").getAsInt();
+            int count = file.has("importedEntries") ? file.get("importedEntries").getAsInt() : file.get("entries").getAsInt();
             for (int i = 0; i < count; i++) {
                 JsonElement entry = all.get(position++);
                 String id = sourceId(entry);
@@ -193,6 +205,14 @@ public final class SourceCatalogManager {
         return new Merged(unique, sources, duplicates);
     }
 
+    static String rssSourceId(JsonElement entry) {
+        if (!entry.isJsonObject() || !entry.getAsJsonObject().has("sourceUrl"))
+            throw new IllegalArgumentException("RSS source lacks sourceUrl");
+        String id = entry.getAsJsonObject().get("sourceUrl").getAsString().trim();
+        normalizedHttpId(id);
+        return id;
+    }
+
     private static String sourceId(JsonElement entry) {
         if (!entry.isJsonObject() || !entry.getAsJsonObject().has("bookSourceUrl"))
             throw new IllegalArgumentException("Source lacks bookSourceUrl");
@@ -203,6 +223,20 @@ public final class SourceCatalogManager {
     }
 
     static String normalizedId(String raw) {
+        String id = raw.trim();
+        if (id.isEmpty() || id.chars().anyMatch(Character::isISOControl))
+            throw new IllegalArgumentException("Invalid bookSourceUrl: " + raw);
+        // Legado identifies a BookSource by its key, which can be a descriptive name.
+        // Keep those keys exact; only network URLs receive host/port normalization.
+        if (!id.matches("(?i)^https?://.*")) {
+            if (id.contains("://") || id.matches("^[A-Za-z][A-Za-z0-9+.-]*:.*"))
+                throw new IllegalArgumentException("Invalid bookSourceUrl: " + raw);
+            return "key:" + id;
+        }
+        return normalizedHttpId(id);
+    }
+
+    private static String normalizedHttpId(String raw) {
         URI uri = URI.create(raw.trim());
         if (uri.getHost() == null || !(uri.getScheme().equalsIgnoreCase("http") || uri.getScheme().equalsIgnoreCase("https")))
             throw new IllegalArgumentException("Invalid bookSourceUrl: " + raw);

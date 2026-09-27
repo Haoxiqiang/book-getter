@@ -33,7 +33,8 @@ public final class BatchDownloadProbe {
     private BatchDownloadProbe() {}
 
     public static void main(String[] args) throws Exception {
-        if (args.length != 7) throw new IllegalArgumentException("catalog output sourceFilter target maxChapters maxPages delayMs");
+        if (args.length != 7 && args.length != 8)
+            throw new IllegalArgumentException("catalog output sourceFilter target maxChapters maxPages delayMs [directBookUrl]");
         Path catalog = Path.of(args[0]);
         Path output = Path.of(args[1]);
         String sourceFilter = args[2];
@@ -41,8 +42,11 @@ public final class BatchDownloadProbe {
         int maxChapters = Integer.parseInt(args[4]);
         int maxPages = Integer.parseInt(args[5]);
         long delayMillis = Long.parseLong(args[6]);
+        String directBookUrl = args.length == 8 ? args[7] : null;
         if (target < 1 || target > 100 || maxChapters < 1 || maxPages < 1 || delayMillis < 1500)
             throw new IllegalArgumentException("Invalid limits; at least 1500 ms between HTTP requests is required");
+        if (directBookUrl != null && !ResourceUrls.isHttp(directBookUrl))
+            throw new IllegalArgumentException("Direct book URL must be HTTP(S)");
         String snapshot = Files.readString(catalog.resolve("CURRENT")).trim();
         Path unique = catalog.resolve("snapshots").resolve(snapshot).resolve("unique.json");
         Source source = SourceImporter.parse(Files.readString(unique)).sources().stream()
@@ -69,7 +73,9 @@ public final class BatchDownloadProbe {
         Set<String> seen = new HashSet<>();
         for (int page = 1; page <= maxPages && completed < target; page++) {
             List<BookHit> hits;
-            try { hits = engine.search(source, "", page); }
+            try { hits = directBookUrl == null ? engine.search(source, "", page)
+                    : List.of(new BookHit(source.id(), directBookUrl, directBookUrl,
+                            "", "", "", Kind.TEXT)); }
             catch (Exception e) { log(output, "SEARCH_ERROR", "page=" + page, e); break; }
             System.out.println("PAGE\t" + page + "\thits=" + hits.size());
             if (hits.isEmpty()) break;

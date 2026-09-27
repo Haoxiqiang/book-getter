@@ -9,4 +9,5 @@ dependencies {
     implementation project(':source-core')
     implementation project(':source-runtime-android')
     implementation project(':export')
+    testImplementation 'junit:junit:4.13.2'
 }
