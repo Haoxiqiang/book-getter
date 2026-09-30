@@ -17,23 +17,34 @@ final class CaptureExport {
 
     static void write(OutputStream destination, CaptureJobStore.Job job, List<ChapterContent> captured,
                       boolean complete, CaptureJobStore jobs) throws Exception {
-        commit(destination, job, complete, jobs, output ->
-                new BookExporter().write(job.epub() ? BookExporter.Format.EPUB : BookExporter.Format.TXT,
-                        job.book(), captured, output));
+        commit(destination, job, complete, jobs, output -> {
+            if (complete) {
+                if (captured == null || captured.size() != job.selected().size())
+                    throw new IllegalArgumentException("Complete export must include every selected chapter");
+                for (int index = 0; index < captured.size(); index++)
+                    if (captured.get(index) == null || !job.selected().get(index).equals(captured.get(index).chapter()))
+                        throw new IllegalArgumentException("Complete export chapter order differs from selection");
+            }
+            new BookExporter().write(job.epub() ? BookExporter.Format.EPUB : BookExporter.Format.TXT,
+                    job.book(), captured, output);
+        });
     }
 
     static void writeFromCache(OutputStream destination, CaptureJobStore.Job job, List<Chapter> captured,
                                Source source, ChapterStore cache, boolean complete, CaptureJobStore jobs)
             throws Exception {
-        commit(destination, job, complete, jobs, output ->
-                new BookExporter().writeFrom(job.epub() ? BookExporter.Format.EPUB : BookExporter.Format.TXT,
+        commit(destination, job, complete, jobs, output -> {
+            if (complete && !job.selected().equals(captured))
+                throw new IllegalArgumentException("Complete export must include every selected chapter in order");
+            new BookExporter().writeFrom(job.epub() ? BookExporter.Format.EPUB : BookExporter.Format.TXT,
                         job.book(), captured.size(), index -> {
                             Chapter chapter = captured.get(index);
                             String boundary = SourceEngine.nextReadableUrl(job.catalog(), chapter);
                             ChapterContent content = cache.get(source, job.book(), chapter, boundary);
                             if (content == null) throw new IOException("Cached chapter unavailable: " + chapter.title());
                             return content;
-                        }, output));
+                        }, output);
+        });
     }
 
     private static void commit(OutputStream destination, CaptureJobStore.Job job, boolean complete,

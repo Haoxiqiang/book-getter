@@ -8,7 +8,7 @@ SF 轻小说 `https://m.sfacg.com#南笙21.0101` 的 `ruleSearch.kind` 先把搜
 
 同源关键词“魔王”复测：JVM 与 Android 模拟器均请求搜索 API HTTP 200，搜索 2 条；每条额外请求的 `book.sfacg.com/Novel/<ID>/` 最终 HTTP 200，分类和最新章均非空，原 `kind` 告警消失。首条详情通过，目录仍为 2023 个不同章节 URL；此前已与公开 HTML 链接去重数对照。没有读取章节正文或下载整书。
 
-交叉站点低频探针：啃书小说网停在搜索请求 TLS 握手；木兰花漫搜索为 HTTP 403 挑战页；就去看网搜索要求 Android WebView，JVM 不进入规则。三者都不能作为安全 Jsoup 视图的真实正对照，后续还需另一条可达源。木兰花漫的 `java.log`、就去看网的 `getStringList` 仍为独立待验证宿主缺口，不能因为 SF 通过而视为解决。
+交叉站点低频探针：啃书小说网停在搜索请求 TLS 握手；木兰花漫搜索为 HTTP 403 挑战页；就去看网搜索要求 Android WebView，JVM 不进入规则。三者都不能作为安全 Jsoup 视图的真实正对照，后续还需另一条可达源。木兰花漫的 `java.log` 与就去看网的 `getStringList` 当时未触达；两者后续各补了基础宿主子集，见[调试宿主](js-log-host-probe.md)及[列表宿主](js-getstringlist-probe.md)，仍没有这两站的真实执行正对照。
 
 复测：
 

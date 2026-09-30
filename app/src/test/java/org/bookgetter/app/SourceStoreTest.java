@@ -6,16 +6,88 @@ import org.bookgetter.core.Models.FetchResponse;
 import org.junit.Test;
 
 public final class SourceStoreTest {
+    @Test public void cumulativeNestedResponsesAbortBeforeCommit() throws Exception {
+        String root = "{\"sourceUrls\":[\"https://feed.test/a\",\"https://feed.test/b\"]}";
+        String first = "{\"bookSourceUrl\":\"https://new-a.test\"}";
+        String second = "{\"bookSourceUrl\":\"https://new-b.test\"}";
+        SourceStore store = new SourceStore(new MemoryStorage(),
+                root.getBytes(java.nio.charset.StandardCharsets.UTF_8).length
+                        + first.getBytes(java.nio.charset.StandardCharsets.UTF_8).length
+                        + second.getBytes(java.nio.charset.StandardCharsets.UTF_8).length - 1);
+        var error = assertThrows(IllegalArgumentException.class, () -> store.importText(root, request ->
+                new FetchResponse(request.url(), request.url().endsWith("/a") ? first : second, 200, Map.of())));
+        assertTrue(error.getMessage().contains("total byte limit"));
+        assertTrue(store.all().isEmpty());
+    }
+
+    @Test public void selectedCollectionsShareAnImportBudget() throws Exception {
+        String first = "{\"bookSourceUrl\":\"https://collection-a.test\"}";
+        String second = "{\"bookSourceUrl\":\"https://collection-b.test\"}";
+        SourceStore store = new SourceStore(new MemoryStorage(),
+                first.getBytes(java.nio.charset.StandardCharsets.UTF_8).length
+                        + second.getBytes(java.nio.charset.StandardCharsets.UTF_8).length - 1);
+        SourceStore.DirectoryPreview preview = new SourceStore.DirectoryPreview("https://feed.test/index",
+                java.util.List.of(new org.bookgetter.core.MiaogongziDirectoryAdapter.Collection(
+                                "A", "https://feed.test/a"),
+                        new org.bookgetter.core.MiaogongziDirectoryAdapter.Collection(
+                                "B", "https://feed.test/b")));
+        var error = assertThrows(IllegalArgumentException.class, () -> store.importDirectorySelection(preview,
+                java.util.List.of("A", "B"), request -> new FetchResponse(request.url(),
+                        request.url().endsWith("/a") ? first : second, 200, Map.of())));
+        assertTrue(error.getMessage().contains("total byte limit"));
+        assertTrue(store.all().isEmpty());
+        assertTrue(store.subscriptions().isEmpty());
+    }
+
+    @Test public void refreshingSeveralSubscriptionsUsesOneBudgetAndKeepsOldSnapshot() throws Exception {
+        String first = "{\"bookSourceUrl\":\"https://old-a.test\"}";
+        String second = "{\"bookSourceUrl\":\"https://old-b.test\"}";
+        SourceStore store = new SourceStore(new MemoryStorage(), Math.max(first.length(), second.length()));
+        store.importUrl("https://feed.test/a", request -> new FetchResponse(request.url(), first, 200, Map.of()));
+        store.importUrl("https://feed.test/b", request -> new FetchResponse(request.url(), second, 200, Map.of()));
+        var error = assertThrows(IllegalArgumentException.class, () -> store.updateSubscriptions(request ->
+                new FetchResponse(request.url(), request.url().endsWith("/a") ? first : second, 200, Map.of())));
+        assertTrue(error.getMessage().contains("total byte limit"));
+        assertEquals(java.util.Set.of("https://old-a.test", "https://old-b.test"),
+                store.all().stream().map(source -> source.id()).collect(java.util.stream.Collectors.toSet()));
+        assertEquals(2, store.subscriptions().size());
+    }
+    @Test public void oversizedSubscriptionDoesNotReplaceSavedSources() throws Exception {
+        SourceStore store = new SourceStore(new MemoryStorage());
+        store.importText("{\"bookSourceUrl\":\"https://old.test\"}", request ->
+                new FetchResponse(request.url(), "", 200, Map.of()));
+        String oversized = " ".repeat(SourceStore.MAX_SOURCE_BYTES + 1);
+        var error = assertThrows(IllegalArgumentException.class, () -> store.importUrl("https://feed.test/large", request ->
+                new FetchResponse(request.url(), oversized, 200, Map.of())));
+        assertTrue(error.getMessage().contains("16 MiB"));
+        assertEquals("https://old.test", store.all().get(0).id());
+    }
+    @Test public void excessiveNestedUrlsAbortWithoutCommitting() {
+        SourceStore store = new SourceStore(new MemoryStorage());
+        StringBuilder json = new StringBuilder("{\"sourceUrls\":[");
+        for (int index = 0; index < 101; index++) {
+            if (index > 0) json.append(',');
+            json.append('"').append("https://feed.test/").append(index).append('"');
+        }
+        json.append("]}");
+        var error = assertThrows(IllegalArgumentException.class, () -> store.importText(json.toString(), request ->
+                new FetchResponse(request.url(), "{\"bookSourceUrl\":\"" + request.url() + "\"}", 200, Map.of())));
+        assertTrue(error.getMessage().contains("100 nested URLs"));
+        assertTrue(store.all().isEmpty());
+    }
     private static final class MemoryStorage implements SourceStore.Storage {
         String value = "[]";
         String subscriptions = "[]";
+        String manualSources;
         boolean writable = true;
         @Override public String read() { return value; }
         @Override public String readSubscriptions() { return subscriptions; }
-        @Override public boolean write(String json, String feeds) {
+        @Override public String readManualSources() { return manualSources; }
+        @Override public boolean write(String json, String feeds, String manual) {
             if (!writable) return false;
             value = json;
             subscriptions = feeds;
+            manualSources = manual;
             return true;
         }
     }
@@ -118,6 +190,57 @@ public final class SourceStoreTest {
                 "[{\"bookSourceUrl\":\"https://new.test\"}]", 200, Map.of()));
         assertEquals(java.util.Set.of("https://manual.test", "https://new.test"),
                 recreated.all().stream().map(source -> source.id()).collect(java.util.stream.Collectors.toSet()));
+    }
+
+    @Test public void removingFeedOverlapRestoresOriginalManualDefinition() throws Exception {
+        MemoryStorage storage = new MemoryStorage();
+        // A pre-migration manual import has no separate provenance snapshot yet.
+        storage.value = "[{\"bookSourceUrl\":\"https://shared.test\",\"bookSourceName\":\"Manual\"}]";
+        SourceStore store = new SourceStore(storage);
+        String feedUrl = "https://feed.test/list";
+        store.importUrl(feedUrl, request -> new FetchResponse(request.url(),
+                "{\"bookSourceUrl\":\"https://shared.test\",\"bookSourceName\":\"Feed\"}", 200, Map.of()));
+        assertEquals("Feed", store.all().get(0).string("bookSourceName"));
+        SourceStore recreated = new SourceStore(storage);
+        recreated.updateSubscriptions(request -> new FetchResponse(request.url(),
+                "{\"bookSourceUrl\":\"https://new.test\"}", 200, Map.of()));
+        assertEquals(java.util.Set.of("https://shared.test", "https://new.test"),
+                recreated.all().stream().map(source -> source.id()).collect(java.util.stream.Collectors.toSet()));
+        assertEquals("Manual", recreated.all().stream().filter(source -> source.id().equals("https://shared.test"))
+                .findFirst().orElseThrow().string("bookSourceName"));
+    }
+
+    @Test public void reimportingFeedWithoutSharedIdRestoresManualSource() throws Exception {
+        SourceStore store = new SourceStore(new MemoryStorage());
+        store.importText("{\"bookSourceUrl\":\"https://shared.test\",\"bookSourceName\":\"Manual\"}",
+                request -> new FetchResponse(request.url(), "", 200, Map.of()));
+        String feedUrl = "https://feed.test/list";
+        store.importUrl(feedUrl, request -> new FetchResponse(request.url(),
+                "{\"bookSourceUrl\":\"https://shared.test\",\"bookSourceName\":\"Feed\"}", 200, Map.of()));
+        store.importUrl(feedUrl, request -> new FetchResponse(request.url(),
+                "{\"bookSourceUrl\":\"https://new.test\"}", 200, Map.of()));
+        assertEquals("Manual", store.all().stream().filter(source -> source.id().equals("https://shared.test"))
+                .findFirst().orElseThrow().string("bookSourceName"));
+    }
+
+    @Test public void failedOverlapRefreshKeepsEffectiveAndManualSnapshots() throws Exception {
+        MemoryStorage storage = new MemoryStorage();
+        SourceStore store = new SourceStore(storage);
+        store.importText("{\"bookSourceUrl\":\"https://shared.test\",\"bookSourceName\":\"Manual\"}",
+                request -> new FetchResponse(request.url(), "", 200, Map.of()));
+        store.importUrl("https://feed.test/list", request -> new FetchResponse(request.url(),
+                "{\"bookSourceUrl\":\"https://shared.test\",\"bookSourceName\":\"Feed\"}", 200, Map.of()));
+        String manualBefore = storage.manualSources;
+        storage.writable = false;
+        assertThrows(IllegalStateException.class, () -> store.updateSubscriptions(request ->
+                new FetchResponse(request.url(), "{\"bookSourceUrl\":\"https://new.test\"}", 200, Map.of())));
+        assertEquals("Feed", store.all().get(0).string("bookSourceName"));
+        assertEquals(manualBefore, storage.manualSources);
+        storage.writable = true;
+        store.updateSubscriptions(request -> new FetchResponse(request.url(),
+                "{\"bookSourceUrl\":\"https://new.test\"}", 200, Map.of()));
+        assertEquals("Manual", store.all().stream().filter(source -> source.id().equals("https://shared.test"))
+                .findFirst().orElseThrow().string("bookSourceName"));
     }
 
     @Test public void failedRefreshPreservesSourcesAndSubscription() throws Exception {

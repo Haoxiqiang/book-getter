@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.StringJoiner;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -20,12 +21,11 @@ import org.jsoup.nodes.Element;
 /** Stateless capture pipeline; callers own persistence, scheduling and user interaction. */
 public final class SourceEngine {
     private static final int MAX_PAGES = 50;
-    private final Transport transport;
+    private final StageFetcher fetcher;
     private final ScriptRuntime scripts;
     private final RequestPlanner requests;
     private final RuleEvaluator rules;
     private final Consumer<Diagnostic> diagnostics;
-    private final Consumer<StageTrace> traces;
 
     public SourceEngine(Transport transport) { this(transport, new RhinoRuntime(transport)); }
     public SourceEngine(Transport transport, ScriptRuntime scripts) {
@@ -36,7 +36,7 @@ public final class SourceEngine {
     }
     public SourceEngine(Transport transport, ScriptRuntime scripts, Consumer<Diagnostic> diagnostics,
                         Consumer<StageTrace> traces) {
-        this.transport = transport; this.scripts = scripts; this.diagnostics = diagnostics; this.traces = traces;
+        this.fetcher = new StageFetcher(transport, traces); this.scripts = scripts; this.diagnostics = diagnostics;
         requests = new RequestPlanner(scripts); rules = new RuleEvaluator(scripts);
     }
 
@@ -57,7 +57,7 @@ public final class SourceEngine {
         try {
             if (source.isJsSource()) return jsSearch(source, keyword, page);
             FetchResponse response;
-            try { response = fetch(plan(source.string("searchUrl"), source, keyword, page, source.id(),
+            try { response = fetcher.fetch(plan(source.string("searchUrl"), source, keyword, page, source.id(),
                             Stage.SEARCH, "searchUrl"),
                     Stage.SEARCH, source.id(), "searchUrl"); }
             catch (SourceFailure e) { throw e; }
@@ -130,7 +130,7 @@ public final class SourceEngine {
     public List<BookHit> explore(Source source, ExploreEntry entry, int page) {
         try {
             if (source.isJsSource()) return jsHits(source, "explore", Map.of("url", entry.url(), "page", page));
-            FetchResponse response = fetch(plan(entry.url(), source, "", page, source.id(),
+            FetchResponse response = fetcher.fetch(plan(entry.url(), source, "", page, source.id(),
                             Stage.SEARCH, "exploreUrl"),
                     Stage.SEARCH, source.id(), "exploreUrl");
             String section = source.rule("ruleExplore", "bookList") == null ? "ruleSearch" : "ruleExplore";
@@ -196,7 +196,7 @@ public final class SourceEngine {
         scripts.enterBook(jsBook(new BookDetail(hit, hit.url(), List.of())));
         try {
             if (source.isJsSource()) return jsDetail(source, hit);
-            FetchResponse response = fetch(plan(hit.url(), source, "", 1, source.id(),
+            FetchResponse response = fetcher.fetch(plan(hit.url(), source, "", 1, source.id(),
                             Stage.DETAIL, "ruleBookInfo.init"),
                     Stage.DETAIL, source.id(), "ruleBookInfo.init");
             Object detailContent = response.body();
@@ -252,7 +252,7 @@ public final class SourceEngine {
             String page = book.tocUrl();
             while (page != null && !page.isBlank()) {
                 checkPage(visited, page, Stage.CATALOG, source.id(), "ruleToc.nextTocUrl");
-                FetchResponse response = fetch(plan(page, source, "", 1, book.hit().url(),
+                FetchResponse response = fetcher.fetch(plan(page, source, "", 1, book.hit().url(),
                                 Stage.CATALOG, "ruleToc.nextTocUrl"),
                         Stage.CATALOG, source.id(), "ruleToc.chapterList");
                 checkFinalPage(finalUrls, response.url(), Stage.CATALOG, source.id(), "ruleToc.nextTocUrl");
@@ -327,7 +327,7 @@ public final class SourceEngine {
                     checkPage(visited, page, Stage.CONTENT, source.id(), "ruleContent.nextContentUrl");
                     FetchRequest request = plan(page, source, "", 1, book.tocUrl(),
                             Stage.CONTENT, "ruleContent.nextContentUrl");
-                    FetchResponse response = fetchContent(request, source, visited.size() == 1);
+                    FetchResponse response = fetcher.fetchContent(request, source, visited.size() == 1);
                     // Even the first request may redirect to the following chapter. A book page
                     // can legitimately be the initial content URL, so only reject it on later pages.
                     if (response.url().equals(nextChapterUrl)
@@ -353,8 +353,12 @@ public final class SourceEngine {
             if (invalidContent(text)) throw new SourceFailure(Stage.CONTENT, source.id(), "ruleContent.content", "Empty chapter content");
             String replaceRegex = source.rule("ruleContent", "replaceRegex");
             if (!source.isJsSource() && replaceRegex != null && !replaceRegex.isBlank()) {
-                String normalized = text.lines().map(String::trim).collect(java.util.stream.Collectors.joining("\n"));
-                text = field(source, "ruleContent", "replaceRegex", normalized, chapter.url(), false);
+                String[] lines = text.split("\\r\\n|\\r|\\n", -1);
+                int count = lines.length;
+                if (count > 0 && lines[count - 1].isEmpty()) count--;
+                StringJoiner normalized = new StringJoiner("\n");
+                for (int i = 0; i < count; i++) normalized.add(lines[i].trim());
+                text = field(source, "ruleContent", "replaceRegex", normalized.toString(), chapter.url(), false);
                 if (invalidContent(text)) throw new SourceFailure(Stage.CONTENT, source.id(),
                         "ruleContent.replaceRegex", "Replacement removed all chapter content");
             }
@@ -482,93 +486,6 @@ public final class SourceEngine {
             throw new SourceFailure(stage, source.id(), field, "REQUEST_PLAN_ERROR",
                     "Cannot plan request (" + e.getClass().getSimpleName() + ")", e);
         }
-    }
-
-    private FetchResponse fetch(FetchRequest request, Stage stage, String sourceId, String field) {
-        FetchResponse response;
-        try { response = transport.fetch(request); }
-        catch (WebContentTransport.HttpStatusException e) {
-            throw browserStatusFailure(request, stage, sourceId, field, e);
-        }
-        catch (Exception e) {
-            throw new SourceFailure(stage, sourceId, field, "REQUEST_ERROR",
-                    "Request failed at " + ResponseSignals.urlForLog(request.url())
-                            + " (" + e.getClass().getSimpleName() + ")", e);
-        }
-        trace(request, response, stage, sourceId, field);
-        validateResponse(response, request, stage, sourceId, field);
-        return response;
-    }
-
-    private static void validateResponse(FetchResponse response, FetchRequest request,
-                                         Stage stage, String sourceId, String field) {
-        if (response.status() >= 300 && response.status() < 400)
-            throw new SourceFailure(stage, sourceId, field, "UNRESOLVED_REDIRECT",
-                    "Unresolved HTTP redirect " + response.status() + " at " + ResponseSignals.urlForLog(request.url()));
-        if (response.status() >= 400)
-            throw new SourceFailure(stage, sourceId, field,
-                    response.status() == 401 || response.status() == 403 ? "ACCESS_DENIED" : "HTTP_ERROR",
-                    "HTTP " + response.status() + " at " + ResponseSignals.urlForLog(request.url()));
-        rejectUnusableResponse(response, stage, sourceId, field);
-    }
-
-    private FetchResponse fetchContent(FetchRequest request, Source source, boolean firstPage) {
-        // Legado only sniffs resources on the initial chapter request; later pages may still run webJs.
-        String sourceRegex = firstPage ? source.rule("ruleContent", "sourceRegex") : null;
-        String webJs = source.rule("ruleContent", "webJs");
-        String browserField = sourceRegex != null && !sourceRegex.isBlank()
-                ? "ruleContent.sourceRegex" : "ruleContent.webJs";
-        if ((sourceRegex == null || sourceRegex.isBlank()) && (webJs == null || webJs.isBlank()))
-            return fetch(request, Stage.CONTENT, source.id(), "ruleContent.content");
-        if (!(transport instanceof WebContentTransport browser))
-            throw new SourceFailure(Stage.CONTENT, source.id(),
-                    browserField,
-                    "UNSUPPORTED", "Content rule requires a browser transport");
-        try {
-            FetchResponse response = browser.fetchContent(request, sourceRegex, webJs);
-            trace(request, response, Stage.CONTENT, source.id(), "ruleContent.content");
-            validateResponse(response, request, Stage.CONTENT, source.id(), "ruleContent.content");
-            return response;
-        } catch (SourceFailure e) { throw e; }
-        catch (WebContentTransport.HttpStatusException e) {
-            throw browserStatusFailure(request, Stage.CONTENT, source.id(), browserField, e);
-        }
-        catch (WebContentTransport.NoMatchingResourceException e) {
-            throw new SourceFailure(Stage.CONTENT, source.id(), "ruleContent.sourceRegex", "SOURCE_REGEX_NO_MATCH",
-                    e.getMessage(), e);
-        }
-        catch (Exception e) {
-            throw new SourceFailure(Stage.CONTENT, source.id(), browserField, "REQUEST_ERROR",
-                    "Browser content request failed at " + ResponseSignals.urlForLog(request.url())
-                            + " (" + e.getClass().getSimpleName() + ")", e);
-        }
-    }
-
-    private void trace(FetchRequest request, FetchResponse response, Stage stage, String sourceId, String field) {
-        traces.accept(new StageTrace(stage, sourceId, field, request.method(),
-                ResponseSignals.urlForLog(request.url()), ResponseSignals.urlForLog(response.url()),
-                response.status(), ResponseSignals.quality(response)));
-    }
-
-    private SourceFailure browserStatusFailure(FetchRequest request, Stage stage, String sourceId, String field,
-                                               WebContentTransport.HttpStatusException error) {
-        FetchResponse failed = new FetchResponse(error.url(), "", error.status(), Map.of());
-        trace(request, failed, stage, sourceId, field);
-        try { validateResponse(failed, request, stage, sourceId, field); }
-        catch (SourceFailure failure) { return failure; }
-        return new SourceFailure(stage, sourceId, field, "REQUEST_ERROR",
-                "Browser reported an unexpected HTTP status " + error.status());
-    }
-
-    private static void rejectUnusableResponse(FetchResponse response, Stage stage, String sourceId, String field) {
-        String quality = ResponseSignals.quality(response);
-        if (quality.equals("BUSINESS_ERROR") || quality.equals("EMPTY_RESPONSE")
-                || quality.equals("LOGIN_REQUIRED")
-                || quality.equals("CHALLENGE_PAGE") || quality.equals("PARKED_DOMAIN")
-                || quality.equals("CLIENT_SIDE_REDIRECT")
-                || quality.equals("APP_UPGRADE_REQUIRED") || quality.equals("PAGE_NOT_FOUND"))
-            throw new SourceFailure(stage, sourceId, field, quality,
-                    "Unusable source response: " + quality + " (HTTP " + response.status() + ")");
     }
 
     private static void requireIdentity(Source source, String sourceId, Stage stage) {

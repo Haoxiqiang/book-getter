@@ -18,10 +18,11 @@ App (导入、选择、任务与导出 UI)
   │                     └─ ScriptRuntime (Rhino 基础宿主 API)
   ├─ ChapterStore (按书源快照、书籍上下文和下一章边界隔离的逐章缓存)
   ├─ CaptureJobStore (选章任务与进度)
+  ├─ CaptureRunner (抓取、续跑、进度写入与缓存导出)
   └─ BookExporter (TXT/EPUB)
 ```
 
-`SourceEngine` 不依赖 Activity、Room、文件系统或 Android 类；其输入与输出是 Java 数据类型。`Transport` 决定网络与浏览器获取方式，Android 实现使用同一个 CookieManager。未来可以换实现做离线重放、调试日志或测试，不改变规则层。
+`SourceEngine` 不依赖 Activity、Room、文件系统或 Android 类；其输入与输出是 Java 数据类型。阶段请求经 `StageFetcher` 统一分类、追踪，再由 `Transport` 决定 HTTP 或浏览器获取方式；Android 实现使用同一个 CookieManager。`CaptureRunner` 不持有 Activity 状态，文件流由界面在用户选定位置后提供。
 
 ## 公共接口及身份
 
@@ -33,7 +34,7 @@ App (导入、选择、任务与导出 UI)
 
 ## 请求、登录与持久化
 
-请求规划处理相对 URL、`{{key}}`、`{{page}}`、请求头与基础的 `,{...}` 选项。规则内 `<js>` 和 `@js:` 经可中断、带 60 秒执行上限的 Rhino 解释器执行；`mainJs` 首批执行四个基础函数。HTTP Cookie 从 Android CookieManager 读取，响应 Set-Cookie 写回；手动登录 WebView 使用同一 CookieManager。`webView:true` 经后台 WebView 抓取渲染后的 HTML。
+请求规划处理相对 URL、`{{key}}`、`{{page}}`、请求头与基础的 `,{...}` 选项。书源文件及每份订阅响应最多 16 MiB，单次导入最多 10,000 个不同书源、100 个嵌套 URL；HTTP 和 WebView 响应最多 32 MiB，超限明确失败。规则内 `<js>` 和 `@js:` 经可中断、带 60 秒执行上限的 Rhino 解释器执行；`mainJs` 首批执行四个基础函数。HTTP Cookie 从 Android CookieManager 读取，响应 Set-Cookie 写回；手动登录 WebView 使用同一 CookieManager。`webView:true` 经后台 WebView 抓取渲染后的 HTML。
 
 成功章节写入应用私有目录，键由书源 JSON 快照、书籍上下文、完整章节快照和已知下一章边界组成；规则变化后不会误用旧缓存。选章任务、目录快照和逐章进度另行保存，重开应用可以重新选择导出位置并续抓。取消能停止后续章节，但应用进程被系统回收时正在执行的网络请求不会后台继续；部分导出明确保留缺章清单。整书导出从缓存逐章读取正文，取消时停止后续写入。
 

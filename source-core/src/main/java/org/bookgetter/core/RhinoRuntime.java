@@ -2,6 +2,7 @@ package org.bookgetter.core;
 
 import com.google.gson.Gson;
 import java.net.URLEncoder;
+import java.net.HttpCookie;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
@@ -43,13 +44,18 @@ public final class RhinoRuntime implements ScriptRuntime {
     };
     private final Transport transport;
     private final Consumer<String> notification;
+    private final Consumer<String> debugLog;
     private final Gson gson = new Gson();
     private final Map<String, Map<String, String>> sourceVariables = new ConcurrentHashMap<>();
     private final ThreadLocal<Map<String, Object>> currentBook = new ThreadLocal<>();
     public RhinoRuntime(Transport transport) { this(transport, ignored -> {}); }
     public RhinoRuntime(Transport transport, Consumer<String> notification) {
+        this(transport, notification, ignored -> {});
+    }
+    public RhinoRuntime(Transport transport, Consumer<String> notification, Consumer<String> debugLog) {
         this.transport = transport;
         this.notification = notification;
+        this.debugLog = debugLog;
     }
 
     @Override public void enterBook(Map<String, Object> book) {
@@ -115,6 +121,14 @@ public final class RhinoRuntime implements ScriptRuntime {
             };
             ScriptableObject.putProperty(java, "toast", notify);
             ScriptableObject.putProperty(java, "longToast", notify);
+            ScriptableObject.putProperty(java, "log", new BaseFunction() {
+                @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
+                    Object value = args.length == 0 || args[0] == Undefined.instance ? null : args[0];
+                    debugLog.accept((source == null ? "source" : source.id()) + ": "
+                            + (value == null ? "null" : Context.toString(value)));
+                    return value;
+                }
+            });
             ScriptableObject.putProperty(java, "startBrowserAwait", new BaseFunction() {
                 @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
                     throw Context.reportRuntimeError("Interactive browser verification is unavailable in this runtime");
@@ -168,10 +182,8 @@ public final class RhinoRuntime implements ScriptRuntime {
                     String rule = args.length == 0 ? "" : Context.toString(args[0]);
                     Object input = args.length > 1 && args[1] != Undefined.instance
                             ? Context.toString(args[1]) : ruleContent[0];
-                    // RuleEvaluator.one applies Legado's terminal @text/@href action and
-                    // fallback branches; many() alone returns selector nodes.
-                    String selected = hostRules.one(rule, input, ruleBaseUrl, source, false);
-                    List<String> values = selected.isEmpty() ? List.of() : List.of(selected.split("\\n", -1));
+                    boolean isUrl = args.length > 2 && Context.toBoolean(args[2]);
+                    List<String> values = hostRules.stringList(rule, input, ruleBaseUrl, source, isUrl);
                     return stringListView(context, scope, values);
                 }
             });
@@ -243,6 +255,19 @@ public final class RhinoRuntime implements ScriptRuntime {
                     try {
                         FetchResponse response = transport.fetch(new FetchRequest(url, "POST", headers,
                                 body, null, false, 0, false));
+                        return responseView(context, scope, response);
+                    } catch (Exception e) { throw Context.throwAsScriptRuntimeEx(e); }
+                }
+            });
+            ScriptableObject.putProperty(java, "head", new BaseFunction() {
+                @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
+                    if (args.length == 0) throw Context.reportRuntimeError("java.head requires URL");
+                    if (args.length > 2) throw Context.reportRuntimeError("java.head timeout overload is unavailable");
+                    String url = Context.toString(args[0]);
+                    Map<String, String> headers = requestHeaders(args.length > 1 ? args[1] : null);
+                    try {
+                        FetchResponse response = transport.fetch(new FetchRequest(url, "HEAD", headers,
+                                null, null, false, 0, false));
                         return responseView(context, scope, response);
                     } catch (Exception e) { throw Context.throwAsScriptRuntimeEx(e); }
                 }
@@ -408,15 +433,15 @@ public final class RhinoRuntime implements ScriptRuntime {
         }
         if (input instanceof Scriptable object) {
             for (Object id : object.getIds()) {
-                if (!(id instanceof String name)) throw Context.reportRuntimeError("java.post header names must be strings");
+                if (!(id instanceof String name)) throw Context.reportRuntimeError("Request header names must be strings");
                 Object value = ScriptableObject.getProperty(object, name);
                 if (value == null || value == Undefined.instance)
-                    throw Context.reportRuntimeError("java.post header values cannot be null");
+                    throw Context.reportRuntimeError("Request header values cannot be null");
                 headers.put(name, Context.toString(value));
             }
             return headers;
         }
-        throw Context.reportRuntimeError("java.post headers must be an object or JSON string");
+        throw Context.reportRuntimeError("Request headers must be an object or JSON string");
     }
 
     private static Scriptable responseView(Context context, Scriptable scope, FetchResponse response) {
@@ -430,6 +455,22 @@ public final class RhinoRuntime implements ScriptRuntime {
             }
         });
         ScriptableObject.putProperty(view, "body", stringMethod(response::body));
+        ScriptableObject.putProperty(view, "cookies", new BaseFunction() {
+            @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
+                Scriptable cookies = context.newObject(scope);
+                cookies.setPrototype(null);
+                response.headers().forEach((name, value) -> {
+                    if (!name.equalsIgnoreCase("Set-Cookie")) return;
+                    for (String line : value.split("\\n")) {
+                        try {
+                            for (HttpCookie cookie : HttpCookie.parse(line))
+                                ScriptableObject.putProperty(cookies, cookie.getName(), cookie.getValue());
+                        } catch (IllegalArgumentException ignored) { /* Ignore malformed response cookies. */ }
+                    }
+                });
+                return cookies;
+            }
+        });
         ScriptableObject.putProperty(view, "statusCode", new BaseFunction() {
             @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
                 return response.status();

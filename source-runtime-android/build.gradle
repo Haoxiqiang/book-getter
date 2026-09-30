@@ -1,13 +1,18 @@
 plugins { id 'com.android.library' }
 android {
-    namespace 'org.bookgetter.runtime'
-    compileSdk 36
-    defaultConfig { minSdk 23 }
-    compileOptions { sourceCompatibility JavaVersion.VERSION_21; targetCompatibility JavaVersion.VERSION_21 }
+    namespace = 'org.bookgetter.runtime'
+    compileSdk = 36
+    defaultConfig { minSdk = 23 }
+    compileOptions {
+        coreLibraryDesugaringEnabled = true
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
+    }
 }
 dependencies {
     api project(':source-core')
     implementation 'com.squareup.okhttp3:okhttp:3.14.9'
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'com.squareup.okhttp3:mockwebserver:3.14.9'
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
 }

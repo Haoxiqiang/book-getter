@@ -1,6 +1,8 @@
 package org.bookgetter.runtime;
 
 import java.io.IOException;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
@@ -14,10 +16,12 @@ import okhttp3.Response;
 import org.bookgetter.core.Models.FetchRequest;
 import org.bookgetter.core.Models.FetchResponse;
 import org.bookgetter.core.ResponseSignals;
+import org.bookgetter.core.ResponseTooLargeException;
 
 /** HTTP transport kept separate from WebView so redirect behavior is verifiable on the JVM. */
 final class HttpSourceTransport {
     private static final int MAX_REDIRECTS = 10;
+    static final int MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
     private final OkHttpClient client;
 
     HttpSourceTransport(OkHttpClient client) {
@@ -64,12 +68,30 @@ final class HttpSourceTransport {
                         : response.body() != null && response.body().contentType() != null
                         ? response.body().contentType().charset(StandardCharsets.UTF_8)
                         : StandardCharsets.UTF_8;
-                String text = response.body() == null ? "" : new String(response.body().bytes(), charset);
+                String text = method.equalsIgnoreCase("HEAD") || response.body() == null ? "" : new String(readLimited(response.body().byteStream(),
+                        response.body().contentLength()), charset);
                 Map<String, String> responseHeaders = new LinkedHashMap<>();
-                for (String name : response.headers().names()) responseHeaders.put(name, response.header(name));
+                for (String name : response.headers().names()) {
+                    // HEAD rules can inspect every Set-Cookie field through Response.cookies().
+                    // A comma is not a safe separator because Expires contains a comma.
+                    responseHeaders.put(name, name.equalsIgnoreCase("Set-Cookie")
+                            ? String.join("\n", response.headers().values(name)) : response.header(name));
+                }
                 return new FetchResponse(response.request().url().toString(), text, response.code(), responseHeaders);
             }
         }
         throw new IOException("Too many redirects at " + ResponseSignals.urlForLog(target));
+    }
+
+    private static byte[] readLimited(InputStream input, long contentLength) throws IOException {
+        if (contentLength > MAX_RESPONSE_BYTES) throw new ResponseTooLargeException(MAX_RESPONSE_BYTES);
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        int count;
+        while ((count = input.read(buffer)) != -1) {
+            if (bytes.size() > MAX_RESPONSE_BYTES - count) throw new ResponseTooLargeException(MAX_RESPONSE_BYTES);
+            bytes.write(buffer, 0, count);
+        }
+        return bytes.toByteArray();
     }
 }

@@ -1,13 +1,18 @@
 plugins { id 'com.android.application' }
 android {
-    namespace 'org.bookgetter.app'
-    compileSdk 36
-    defaultConfig { applicationId 'org.bookgetter.app'; minSdk 23; targetSdk 36; versionCode 1; versionName '0.1' }
-    compileOptions { sourceCompatibility JavaVersion.VERSION_21; targetCompatibility JavaVersion.VERSION_21 }
+    namespace = 'org.bookgetter.app'
+    compileSdk = 36
+    defaultConfig { applicationId = 'org.bookgetter.app'; minSdk = 23; targetSdk = 36; versionCode = 1; versionName = '0.1' }
+    compileOptions {
+        coreLibraryDesugaringEnabled = true
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
+    }
 }
 dependencies {
     implementation project(':source-core')
     implementation project(':source-runtime-android')
     implementation project(':export')
     testImplementation 'junit:junit:4.13.2'
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
 }

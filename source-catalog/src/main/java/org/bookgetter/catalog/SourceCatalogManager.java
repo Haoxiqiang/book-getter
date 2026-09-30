@@ -7,6 +7,8 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -15,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.Comparator;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
@@ -29,20 +32,46 @@ import java.util.UUID;
 /** Download, deduplicate and verify a local-only snapshot of upstream Legado JSON sources. */
 public final class SourceCatalogManager {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
+    static final int MAX_FEED_BYTES = 16 * 1024 * 1024;
+    static final long MAX_UPDATE_BYTES = 64L * 1024 * 1024;
     private SourceCatalogManager() {}
 
     public static void main(String[] args) throws Exception {
-        if (args.length != 2) throw new IllegalArgumentException("Usage: update|verify|list <catalog-directory>");
+        if (args.length != 2) throw new IllegalArgumentException("Usage: update|verify|list|check-config <catalog-directory>");
         Path directory = Path.of(args[1]).toAbsolutePath().normalize();
         switch (args[0]) {
             case "update" -> update(directory);
             case "verify" -> verify(directory);
             case "list" -> list(directory);
+            case "check-config" -> checkConfig(directory);
             default -> throw new IllegalArgumentException("Unknown command: " + args[0]);
         }
     }
 
+    private static void checkConfig(Path directory) throws IOException {
+        JsonArray feeds = JsonParser.parseString(Files.readString(directory.resolve("feeds.json"))).getAsJsonArray();
+        if (feeds.isEmpty()) throw new IllegalArgumentException("No feeds configured");
+        Set<String> names = new LinkedHashSet<>();
+        for (JsonElement entry : feeds) {
+            JsonObject feed = entry.getAsJsonObject();
+            String file = feed.get("file").getAsString();
+            String url = feed.get("url").getAsString();
+            if (!file.matches("[a-zA-Z0-9._-]+\\.json") || !names.add(file))
+                throw new IllegalArgumentException("Invalid or duplicate feed file name: " + file);
+            boolean httpAllowed = feed.has("allowHttp") && feed.get("allowHttp").getAsBoolean();
+            URI address = URI.create(url);
+            if (!(("https".equalsIgnoreCase(address.getScheme())
+                    || httpAllowed && "http".equalsIgnoreCase(address.getScheme()))
+                    && address.getHost() != null))
+                throw new IllegalArgumentException("Expected HTTPS feed or explicit allowHttp: " + url);
+            if (feed.has("model") && !"rss".equals(feed.get("model").getAsString()))
+                throw new IllegalArgumentException("Unknown source model: " + feed.get("model"));
+        }
+        System.out.println("Checked " + feeds.size() + " feed definitions");
+    }
+
     private static void update(Path directory) throws Exception {
+        checkConfig(directory);
         JsonArray feeds = JsonParser.parseString(Files.readString(directory.resolve("feeds.json"))).getAsJsonArray();
         if (feeds.isEmpty()) throw new IllegalArgumentException("No feeds configured");
         Path snapshots = directory.resolve("snapshots");
@@ -50,12 +79,36 @@ public final class SourceCatalogManager {
         String snapshotName = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
                 .withZone(java.time.ZoneOffset.UTC).format(Instant.now()) + "-" + UUID.randomUUID().toString().substring(0, 8);
         Path staging = snapshots.resolve(".staging-" + snapshotName);
-        Files.createDirectories(staging.resolve("raw"));
+        Path pointerTemp = directory.resolve(".CURRENT-" + UUID.randomUUID());
+        Path finalSnapshot = snapshots.resolve(snapshotName);
+        boolean snapshotMoved = false;
+        try {
+            Files.createDirectories(staging.resolve("raw"));
+            Merged merged = buildSnapshot(feeds, staging);
+            verifySnapshot(staging);
+            Files.move(staging, finalSnapshot, StandardCopyOption.ATOMIC_MOVE);
+            snapshotMoved = true;
+            Files.writeString(pointerTemp, snapshotName + "\n");
+            Files.move(pointerTemp, directory.resolve("CURRENT"), StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING);
+            snapshotMoved = false;
+            System.out.println("Current snapshot: " + snapshotName + "; unique=" + merged.unique().size()
+                    + "; duplicates=" + merged.duplicates().size());
+        } catch (Exception | Error failure) {
+            IOException cleanup = cleanupFailedUpdate(staging, pointerTemp,
+                    snapshotMoved ? finalSnapshot : null);
+            if (cleanup != null) failure.addSuppressed(cleanup);
+            throw failure;
+        }
+    }
+
+    private static Merged buildSnapshot(JsonArray feeds, Path staging) throws Exception {
         HttpClient client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL)
                 .connectTimeout(Duration.ofSeconds(15)).build();
         JsonArray files = new JsonArray();
         JsonArray all = new JsonArray();
         Set<String> names = new LinkedHashSet<>();
+        long downloadedBytes = 0;
         for (JsonElement entry : feeds) {
             JsonObject feed = entry.getAsJsonObject();
             String file = feed.get("file").getAsString();
@@ -68,9 +121,15 @@ public final class SourceCatalogManager {
             boolean rss = feed.has("model") && feed.get("model").getAsString().equals("rss");
             HttpRequest request = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(30))
                     .header("User-Agent", "BookGetterCatalog/1.0 (manual update)").GET().build();
-            HttpResponse<byte[]> response = client.send(request, HttpResponse.BodyHandlers.ofByteArray());
-            if (response.statusCode() != 200) throw new IOException("HTTP " + response.statusCode() + " for " + url);
-            byte[] bytes = response.body();
+            HttpResponse<InputStream> response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            byte[] bytes;
+            try (InputStream body = response.body()) {
+                if (response.statusCode() != 200) throw new IOException("HTTP " + response.statusCode() + " for " + url);
+                bytes = readLimited(body, MAX_FEED_BYTES, file);
+            }
+            downloadedBytes += bytes.length;
+            if (downloadedBytes > MAX_UPDATE_BYTES)
+                throw new IOException("Catalog update exceeds total 64 MiB download limit");
             JsonElement root = JsonParser.parseString(new String(bytes, StandardCharsets.UTF_8));
             JsonArray entries = root.isJsonArray() ? root.getAsJsonArray() : new JsonArray();
             if (!root.isJsonArray()) entries.add(root);
@@ -104,14 +163,7 @@ public final class SourceCatalogManager {
         Files.writeString(staging.resolve("unique.json"), GSON.toJson(merged.unique()) + "\n");
         index.addProperty("uniqueSha256", sha256(Files.readAllBytes(staging.resolve("unique.json"))));
         Files.writeString(staging.resolve("index.json"), GSON.toJson(index) + "\n");
-        verifySnapshot(staging);
-        Path finalSnapshot = snapshots.resolve(snapshotName);
-        move(staging, finalSnapshot);
-        Path pointerTemp = directory.resolve(".CURRENT-" + UUID.randomUUID());
-        Files.writeString(pointerTemp, snapshotName + "\n");
-        move(pointerTemp, directory.resolve("CURRENT"));
-        System.out.println("Current snapshot: " + snapshotName + "; unique=" + merged.unique().size()
-                + "; duplicates=" + merged.duplicates().size());
+        return merged;
     }
 
     private static void verify(Path directory) throws Exception {
@@ -128,7 +180,10 @@ public final class SourceCatalogManager {
             String name = file.get("file").getAsString();
             if (!name.matches("[a-zA-Z0-9._-]+\\.json")) throw new IllegalStateException("Invalid indexed file name: " + name);
             Path path = snapshot.resolve("raw").resolve(name);
-            byte[] bytes = Files.readAllBytes(path);
+            byte[] bytes;
+            try (InputStream input = Files.newInputStream(path)) {
+                bytes = readLimited(input, MAX_FEED_BYTES, name);
+            }
             if (!sha256(bytes).equals(file.get("sha256").getAsString()))
                 throw new IllegalStateException("Raw hash mismatch: " + path);
             JsonElement root = JsonParser.parseString(new String(bytes, StandardCharsets.UTF_8));
@@ -253,11 +308,40 @@ public final class SourceCatalogManager {
         return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
     }
 
-    private static void move(Path from, Path to) throws IOException {
-        try { Files.move(from, to, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING); }
-        catch (java.nio.file.AtomicMoveNotSupportedException ignored) {
-            Files.move(from, to, StandardCopyOption.REPLACE_EXISTING);
+    static byte[] readLimited(InputStream input, int limit, String name) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        byte[] chunk = new byte[8192];
+        int read;
+        while ((read = input.read(chunk)) != -1) {
+            if (read > limit - output.size())
+                throw new IOException("Catalog feed exceeds " + limit + " byte limit: " + name);
+            output.write(chunk, 0, read);
         }
+        return output.toByteArray();
+    }
+
+    private static void deleteTree(Path root) throws IOException {
+        if (!Files.exists(root)) return;
+        try (var paths = Files.walk(root)) {
+            for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) Files.delete(path);
+        }
+    }
+
+    private static IOException cleanupFailedUpdate(Path staging, Path pointerTemp, Path unpublishedSnapshot) {
+        IOException failure = null;
+        try { deleteTree(staging); }
+        catch (IOException error) { failure = error; }
+        try { Files.deleteIfExists(pointerTemp); }
+        catch (IOException error) {
+            if (failure == null) failure = error;
+            else failure.addSuppressed(error);
+        }
+        if (unpublishedSnapshot != null) try { deleteTree(unpublishedSnapshot); }
+        catch (IOException error) {
+            if (failure == null) failure = error;
+            else failure.addSuppressed(error);
+        }
+        return failure;
     }
 
     record Merged(JsonArray unique, JsonArray sources, JsonArray duplicates) {}

@@ -301,6 +301,46 @@ public final class RuleEvaluator {
         return url && !result.isBlank() ? absolute(baseUrl, result) : result;
     }
 
+    /** String-list extraction keeps DOM matches separate, as AnalyzeRule.getStringList does. */
+    public List<String> stringList(String rule, Object input, String baseUrl, Source source, boolean url) {
+        if (rule == null || rule.isBlank()) return List.of();
+        String value = rule.trim();
+        // JSONPath's result is already a list. Joining then splitting it changes items
+        // that contain newlines and can create phantom URLs.
+        if ((value.startsWith("@json:") || value.startsWith("$.") || value.startsWith("$["))
+                && !value.contains("##")) {
+            List<String> selected = new ArrayList<>();
+            for (Object item : many(value, input, baseUrl, source)) selected.add(String.valueOf(item));
+            return normalizeStringList(selected, baseUrl, url);
+        }
+        // Other non-DOM modes still use the existing scalar evaluator's line-list contract.
+        if (value.startsWith("@js:") || value.startsWith("<js>") || value.startsWith("@xpath:")) {
+            String result = one(value, input, baseUrl, source, false);
+            return result.isEmpty() ? List.of() : normalizeStringList(List.of(result.split("\\n", -1)), baseUrl, url);
+        }
+        int actionAt = value.lastIndexOf('@');
+        String action = actionAt > 0 ? value.substring(actionAt + 1) : "text";
+        String selector = actionAt > 0 ? value.substring(0, actionAt) : value;
+        List<String> selected = new ArrayList<>();
+        for (Object item : many(selector, input, baseUrl, source)) {
+            String text = item instanceof Element element ? elementValue(element, action) : String.valueOf(item);
+            if (!text.isEmpty() && (action.equals("text") || action.equals("ownText")
+                    || action.equals("textNodes") || action.equals("html") || action.equals("all")
+                    || !selected.contains(text))) selected.add(text);
+        }
+        return normalizeStringList(selected, baseUrl, url);
+    }
+
+    private static List<String> normalizeStringList(List<String> values, String baseUrl, boolean url) {
+        if (!url) return values;
+        Set<String> unique = new LinkedHashSet<>();
+        for (String value : values) {
+            String absolute = value.isBlank() ? "" : absolute(baseUrl, value);
+            if (!absolute.isEmpty()) unique.add(absolute);
+        }
+        return new ArrayList<>(unique);
+    }
+
     private static String elementValue(Element element, String action) {
         return switch (action) {
             case "text" -> element.text();
@@ -496,6 +536,8 @@ public final class RuleEvaluator {
         String baseSelector = bracket.matches() ? bracket.group(1) : index.matches() ? index.group(1) : selector;
         List<Object> found;
         if (baseSelector.isBlank() && bracket.matches()) found = new ArrayList<>(element.children());
+        else if (baseSelector.startsWith("text."))
+            found = new ArrayList<>(element.getElementsContainingOwnText(baseSelector.substring(5)));
         else if (baseSelector.startsWith("class.") && baseSelector.substring(6).contains(" "))
             found = new ArrayList<>(element.getElementsByClass(baseSelector.substring(6)));
         else {

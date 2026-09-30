@@ -63,7 +63,7 @@ public final class BookExporter {
     }
 
     private void writeEpub(BookDetail book, int chapterCount, ChapterLoader loader, OutputStream output) throws IOException {
-        ZipOutputStream zip = new ZipOutputStream(output, StandardCharsets.UTF_8);
+        ZipOutputStream zip = new ZipOutputStream(output);
         byte[] mimetype = "application/epub+zip".getBytes(StandardCharsets.US_ASCII);
         CRC32 crc = new CRC32(); crc.update(mimetype);
         ZipEntry mime = new ZipEntry("mimetype");
@@ -95,7 +95,7 @@ public final class BookExporter {
         for (Node node : Jsoup.parseBodyFragment(html).body().childNodes()) appendText(node, plain);
         List<String> result = new ArrayList<>();
         for (String line : plain.toString().split("\\R")) {
-            String trimmed = line.strip();
+            String trimmed = stripWhitespace(line);
             if (!trimmed.isEmpty()) result.add(trimmed);
         }
         return result;
@@ -124,10 +124,32 @@ public final class BookExporter {
     private static String cleanXml(String value) {
         String input = nullToEmpty(value);
         StringBuilder clean = new StringBuilder(input.length());
-        input.codePoints().filter(code -> code == 9 || code == 10 || code == 13 ||
-                code >= 0x20 && code <= 0xD7FF || code >= 0xE000 && code <= 0xFFFD ||
-                code >= 0x10000 && code <= 0x10FFFF).forEach(clean::appendCodePoint);
+        for (int offset = 0; offset < input.length();) {
+            int code = Character.codePointAt(input, offset);
+            int width = Character.charCount(code);
+            if (code == 9 || code == 10 || code == 13 ||
+                    code >= 0x20 && code <= 0xD7FF || code >= 0xE000 && code <= 0xFFFD ||
+                    code >= 0x10000 && code <= 0x10FFFF)
+                clean.append(input, offset, offset + width);
+            offset += width;
+        }
         return clean.toString();
+    }
+
+    private static String stripWhitespace(String value) {
+        int start = 0;
+        int end = value.length();
+        while (start < end) {
+            int code = Character.codePointAt(value, start);
+            if (!Character.isWhitespace(code)) break;
+            start += Character.charCount(code);
+        }
+        while (end > start) {
+            int code = Character.codePointBefore(value, end);
+            if (!Character.isWhitespace(code)) break;
+            end -= Character.charCount(code);
+        }
+        return value.substring(start, end);
     }
 
     private static String nullToEmpty(String value) { return value == null ? "" : value; }

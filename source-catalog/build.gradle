@@ -16,3 +16,11 @@ test { useJUnitPlatform() }
         args command, projectDir.absolutePath
     }
 }
+
+tasks.register('checkCatalogConfig', JavaExec) {
+    group = 'source catalog'
+    dependsOn classes
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = application.mainClass
+    args 'check-config', projectDir.absolutePath
+}

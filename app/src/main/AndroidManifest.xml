@@ -1,6 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
-    <application android:label="Book Getter" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:usesCleartextTraffic="true">
+    <application android:label="Book Getter" android:icon="@mipmap/ic_launcher"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar" android:usesCleartextTraffic="true">
         <activity android:name=".LoginActivity" android:exported="false" />
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>

@@ -57,6 +57,12 @@ public final class CaptureJobStoreTest {
             assertEquals(List.of(two), restored.selected());
             assertEquals("Timeout", restored.failures().get(two.url()));
             assertTrue(restored.epub());
+            assertThrows(UnsupportedOperationException.class, () -> restored.catalog().clear());
+            assertThrows(UnsupportedOperationException.class, () -> restored.selected().clear());
+            assertThrows(UnsupportedOperationException.class, () -> restored.failures().clear());
+            assertThrows(UnsupportedOperationException.class, () -> restored.book().downloadUrls().clear());
+            assertThrows(UnsupportedOperationException.class, () ->
+                    restored.book().hit().variables().put("changed", "yes"));
 
             first.clear(job);
             assertNull(new CaptureJobStore(directory.toFile()).get());
@@ -92,6 +98,37 @@ public final class CaptureJobStoreTest {
             assertThrows(IllegalStateException.class, () -> store.update(old));
             store.clear(old);
             assertEquals(newer.selected(), store.get().selected());
+        } finally {
+            Files.deleteIfExists(directory.resolve("capture-job.json.tmp"));
+            Files.deleteIfExists(directory.resolve("capture-job.json"));
+            Files.delete(directory);
+        }
+    }
+
+    @Test public void replacingIdenticalTaskRejectsOldWorkerProgressAndClear() throws Exception {
+        var directory = Files.createTempDirectory("bookgetter-job-generation-");
+        try {
+            CaptureJobStore oldStore = new CaptureJobStore(directory.toFile());
+            CaptureJobStore newStore = new CaptureJobStore(directory.toFile());
+            BookHit hit = new BookHit("https://source.test", "https://source.test/book", "Book", "", "", "", Kind.TEXT);
+            BookDetail book = new BookDetail(hit, hit.url(), List.of());
+            Chapter chapter = new Chapter(hit.url(), "https://source.test/one", "One", 0, false, false);
+            CaptureJobStore.Job old = new CaptureJobStore.Job(hit.sourceId(), "snapshot", book,
+                    List.of(chapter), List.of(chapter), false, 0, Map.of());
+            assertTrue(oldStore.putNew(old));
+            CaptureJobStore.Job replacement = new CaptureJobStore.Job(hit.sourceId(), "snapshot", book,
+                    List.of(chapter), List.of(chapter), false, 0, Map.of());
+            assertTrue(CaptureJobStore.sameTask(old, replacement));
+            assertThrows(IllegalArgumentException.class, () -> newStore.replace(old));
+            newStore.replace(replacement);
+            CaptureJobStore.Job oldProgress = new CaptureJobStore.Job(hit.sourceId(), "snapshot", book,
+                    List.of(chapter), List.of(chapter), false, 1, Map.of(), old.generation());
+            assertThrows(IllegalStateException.class, () -> oldStore.update(oldProgress));
+            oldStore.clear(old);
+            CaptureJobStore.Job restored = new CaptureJobStore(directory.toFile()).get();
+            assertNotNull(restored);
+            assertEquals(replacement.generation(), restored.generation());
+            assertEquals(0, restored.completed());
         } finally {
             Files.deleteIfExists(directory.resolve("capture-job.json.tmp"));
             Files.deleteIfExists(directory.resolve("capture-job.json"));
@@ -147,6 +184,34 @@ public final class CaptureJobStoreTest {
         } finally {
             Files.deleteIfExists(directory.resolve("capture-job.json.tmp"));
             Files.deleteIfExists(directory.resolve("capture-job.json"));
+            Files.delete(directory);
+        }
+    }
+
+    @Test public void incompleteSelectionCannotBeMarkedCompleteAndClearResumableJob() throws Exception {
+        var directory = Files.createTempDirectory("bookgetter-export-incomplete-");
+        try {
+            Source source = SourceImporter.parse("{\"bookSourceUrl\":\"https://source.test\"}").sources().get(0);
+            BookHit hit = new BookHit(source.id(), "https://source.test/book", "Book", "", "", "", Kind.TEXT);
+            BookDetail book = new BookDetail(hit, hit.url(), List.of());
+            Chapter one = new Chapter(hit.url(), "https://source.test/one", "One", 0, false, false);
+            Chapter two = new Chapter(hit.url(), "https://source.test/two", "Two", 1, false, false);
+            CaptureJobStore.Job job = new CaptureJobStore.Job(source.id(), ChapterStore.sourceHash(source), book,
+                    List.of(one, two), List.of(one, two), false, 1, Map.of());
+            CaptureJobStore jobs = new CaptureJobStore(directory.toFile());
+            assertTrue(jobs.putNew(job));
+            var direct = new java.io.ByteArrayOutputStream();
+            assertThrows(IllegalArgumentException.class, () -> CaptureExport.write(direct, job,
+                    List.of(new ChapterContent(one, Kind.TEXT, "First", List.of())), true, jobs));
+            assertEquals(0, direct.size());
+            var cached = new java.io.ByteArrayOutputStream();
+            assertThrows(IllegalArgumentException.class, () -> CaptureExport.writeFromCache(cached, job,
+                    List.of(one), source, new ChapterStore(directory.resolve("cache").toFile()), true, jobs));
+            assertEquals(0, cached.size());
+            assertEquals(job.generation(), jobs.get().generation());
+        } finally {
+            Files.deleteIfExists(directory.resolve("capture-job.json"));
+            Files.deleteIfExists(directory.resolve("cache"));
             Files.delete(directory);
         }
     }

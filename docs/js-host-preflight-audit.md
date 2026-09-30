@@ -1,14 +1,14 @@
 # JS 宿主预检分级与跨站阻断记录
 
-2026-09-27。目标是让兼容诊断准确指向**未提供的方法、仅部分兼容的方法及具体规则字段**，而不是把所有 `java.*` 调用报成未实现。语义优先对照仓库内 Legado `app/src/main/java/io/legado/app/help/JsExtensions.kt`，Java 端实际暴露方法以 `source-core/.../RhinoRuntime.java` 为准。`java.head` 在原版执行不自动跟随跳转的 HTTP HEAD；`java.base64Decode` 有字符串/编码重载；`java.encodeURI` 使用 `URLEncoder`。本工程这些方法目前未提供，不能仅因源站请求失败就宣称它们可运行。
+2026-09-27。目标是让兼容诊断准确指向**未提供的方法、仅部分兼容的方法及具体规则字段**，而不是把所有 `java.*` 调用报成未实现。语义优先对照仓库内 Legado `app/src/main/java/io/legado/app/help/JsExtensions.kt`，Java 端实际暴露方法以 `source-core/.../RhinoRuntime.java` 为准。`java.head` 在原版执行不自动跟随跳转的 HTTP HEAD；`java.base64Decode` 有字符串/编码重载；`java.encodeURI` 使用 `URLEncoder`。本文件保留当时的预检状态；`base64Decode`、`encodeURI` 后续已补基础子集，`head` 后续已补无自动跳转的基础子集。不能仅因源站请求失败就宣称规则分支可运行。
 
 旧预检只豁免 `java.ajax`，因而把已经存在的 `java.get`、`java.post`、`java.md5Encode` 等误列为 `UNSUPPORTED_JS_HOST`；也没有扫描 `jsLib`，并把不同阶段混成 `mainJs/rules`。现按当前宿主的暴露情况分为：
 
 | 级别 | 例子 | 诊断含义 |
 | --- | --- | --- |
 | 不提示 | `ajax`、`put`、`md5Encode`、`base64Encode`、`timeFormatUTC` | 有基础实现；**不**等于所有重载、时序和登录环境均等价 |
-| `PARTIAL_JS_HOST` | `get`、`post`、`getString`、`getElement(s)`、`setContent`、`t2s`、`toast/longToast`、`startBrowserAwait`；后续补入的 `base64Decode`、`encodeURI` 见[编码探针](js-host-encoding-probe.md) | 只支持受控子集、占位或人工交互前提；不能算完全兼容 |
-| `UNSUPPORTED_JS_HOST` | `head`、`getStringList`、`refreshTocUrl` 等 | 当前 Rhino 宿主没有该方法 |
+| `PARTIAL_JS_HOST` | `get`、`post`、`head`、`getString`、`getStringList`、`getElement(s)`、`setContent`、`t2s`、`toast/longToast`、`startBrowserAwait`；后续补入的 `base64Decode`、`encodeURI` 见[编码探针](js-host-encoding-probe.md)，`log` 见[调试宿主探针](js-log-host-probe.md) | 只支持受控子集或依赖人工交互；不能算完全兼容 |
+| `UNSUPPORTED_JS_HOST` | `refreshTocUrl` 等 | 当前 Rhino 宿主没有该方法 |
 
 新预检扫描 `mainJs/jsLib/searchUrl` 以及四个规则段的各字段，诊断带阶段和精确字段；脱网测试覆盖三种级别、`jsLib` 和目录字段定位。`./gradlew :source-core:test :app:assembleDebug --offline` 通过。静态扫描不能证明脚本分支真的执行，实时阶段探针仍是必要条件。
 
@@ -20,7 +20,7 @@ JVM `liveSourceProbe` 现单列 `PREFLIGHT` 行。101 言情的实际原规则�
 
 | 站点/静态候选 | 实时最深阶段 | 当前结论 |
 | --- | --- | --- |
-| 一读小说：搜索规则用 `java.head` | 搜索请求 TLS 握手被远端终止 | 未执行到 `head`；方法缺失是静态实现缺口，不能说它导致了此轮失败 |
+| 一读小说：搜索规则用 `java.head(...).cookies()` | 搜索请求 TLS 握手被远端终止 | 当时未执行到 `head`；目前基础方法及受控响应 Cookie 读取已补，见[专项](java-head-cookies-probe.md)。后续 `source.putLoginHeader` 仍未实现，不能称实站通过 |
 | 101 言情：搜索规则用 `java.base64Decode` | 旧域 301 到新域后 HTTP 404 | 当时未提供、现有[部分兼容子集](js-host-encoding-probe.md)；仍未执行到该规则，优先归站点/源 URL 漂移 |
 | 书香之家：后续规则用 AES/字符串宿主 | 搜索请求 TLS 握手被远端终止 | 未进入详情/目录或加密分支 |
 | 粉丝漫画：正文规则用 `java.getStringList` | 搜索请求 TLS 握手被远端终止 | 未进入正文；没有下载漫画资源 |

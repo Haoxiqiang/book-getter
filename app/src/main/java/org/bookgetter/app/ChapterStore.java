@@ -37,11 +37,15 @@ final class ChapterStore {
                 || !valid(source, content.chapter(), content))
             throw new IllegalArgumentException("Invalid chapter cache entry");
         File file = file(source, book, content.chapter(), nextChapterUrl);
-        File temp = new File(directory, file.getName() + ".tmp");
-        try (OutputStreamWriter writer = new OutputStreamWriter(new FileOutputStream(temp), StandardCharsets.UTF_8)) {
-            gson.toJson(content, writer);
+        File temp = File.createTempFile(file.getName(), ".tmp", directory);
+        try {
+            try (OutputStreamWriter writer = new OutputStreamWriter(new FileOutputStream(temp), StandardCharsets.UTF_8)) {
+                gson.toJson(content, writer);
+            }
+            if (!temp.renameTo(file)) throw new IllegalStateException("Cannot save chapter cache");
+        } finally {
+            if (temp.exists()) temp.delete();
         }
-        if (!temp.renameTo(file)) throw new IllegalStateException("Cannot save chapter cache");
     }
     static String sourceHash(Source source) {
         return hex(digest(source.json().toString()));

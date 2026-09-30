@@ -11,6 +11,27 @@ import org.junit.Test;
 public final class HttpSourceTransportTest {
     private final HttpSourceTransport transport = new HttpSourceTransport(new OkHttpClient());
 
+    @Test public void rejectsOversizedResponseBeforeReadingBody() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.enqueue(new MockResponse().setBody("small")
+                    .setHeader("Content-Length", HttpSourceTransport.MAX_RESPONSE_BYTES + 1L));
+            server.start();
+            var error = assertThrows(java.io.IOException.class,
+                    () -> transport.fetch(new FetchRequest(server.url("/large").toString())));
+            assertTrue(error.getMessage().contains("32 MiB"));
+        }
+    }
+
+    @Test public void rejectsChunkedResponseThatGrowsPastLimit() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.enqueue(new MockResponse().setChunkedBody("x".repeat(HttpSourceTransport.MAX_RESPONSE_BYTES + 1), 65536));
+            server.start();
+            var error = assertThrows(java.io.IOException.class,
+                    () -> transport.fetch(new FetchRequest(server.url("/chunked").toString())));
+            assertTrue(error.getMessage().contains("32 MiB"));
+        }
+    }
+
     @Test public void crossOriginRedirectDropsCredentialsAndKeepsSafeHeaders() throws Exception {
         try (MockWebServer origin = new MockWebServer(); MockWebServer destination = new MockWebServer()) {
             destination.start();
@@ -54,6 +75,36 @@ public final class HttpSourceTransportTest {
             assertEquals(302, notFollowed.status());
             assertEquals(server.url("/post").toString(), notFollowed.url());
             assertEquals("POST", server.takeRequest().getMethod());
+        }
+    }
+
+    @Test public void headDoesNotFollowRedirectWhenRequested() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.enqueue(new MockResponse().setResponseCode(302).addHeader("Location", "/next")
+                    .setHeader("Content-Length", HttpSourceTransport.MAX_RESPONSE_BYTES + 1L));
+            server.start();
+            var response = transport.fetch(new FetchRequest(server.url("/check").toString(), "HEAD",
+                    Map.of("X-Probe", "one"), null, null, false, 0, false));
+            assertEquals(302, response.status());
+            assertEquals("/next", response.headers().get("Location"));
+            var request = server.takeRequest();
+            assertEquals("HEAD", request.getMethod());
+            assertEquals("one", request.getHeader("X-Probe"));
+            assertEquals(1, server.getRequestCount());
+        }
+    }
+
+    @Test public void headPreservesMultipleSetCookieHeaders() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.enqueue(new MockResponse().setResponseCode(302).addHeader("Location", "/next")
+                    .addHeader("Set-Cookie", "token=abc; Path=/")
+                    .addHeader("Set-Cookie", "secret=101; Expires=Wed, 21 Oct 2030 07:28:00 GMT"));
+            server.start();
+            var response = transport.fetch(new FetchRequest(server.url("/check").toString(), "HEAD",
+                    Map.of(), null, null, false, 0, false));
+            assertEquals("token=abc; Path=/\nsecret=101; Expires=Wed, 21 Oct 2030 07:28:00 GMT",
+                    response.headers().get("Set-Cookie"));
+            assertEquals(1, server.getRequestCount());
         }
     }
 

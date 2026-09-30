@@ -1,5 +1,21 @@
 # 验证记录
 
+## 2026-09-27 API 23 与图片归档回归
+
+- `./gradlew :app:lintDebug :app:assembleDebug --offline --console=plain` 通过。应用和 Android 运行库启用核心库 desugaring 后，先前由最低版本 API 23 触发的 77 项 `NewApi` 错误已消除；其余 Lint 警告不影响本次构建。
+- 在 Android 6（API 23）ARM 模拟器 `emulator-5556` 安装 Debug APK。合成书源 `test-fixtures/http/source.json` 的设备探针依次记录 `SEARCH_OK hits=1`、`DETAIL_OK`、`CATALOG_OK chapters=2`、`CONTENT_OK`，首页正常启动。将界面设为较小尺寸后，操作区可滚动到导出按钮，状态与结果区保持可见。
+- 同一台 API 23 模拟器走真实 UI：URL 导入本地合成书源、搜索 `fixture`、打开两章目录、在系统文件选择器保存 TXT 和 EPUB。首次测试发现 `String.codePoints()` 以及带字符集参数的 `ZipOutputStream` 构造方法在设备上抛 `NoSuchMethodError`，导致 0 字节文件；改成 API 23 可运行的字符遍历和 ZIP 构造后，TXT 得到 129 字节且含两章正文，EPUB 得到 1,840 字节，`unzip -t` 对全部 6 个条目通过。失败尝试遗留的 0 字节测试文件不计入通过结果。
+- `ResourceRequestHeadersTest` 新增 CBZ 回归：请求地址故意以 `.jpg` 结尾而响应为 PNG，ZIP 条目按实际图片签名写成 `.png`，内容字节完整。此测试只覆盖本地合成响应。
+- API 23 模拟器进一步导入 `comic-source.json`，真实 UI 下载一章图片归档；得到 194 字节 ZIP，`unzip -t` 通过，唯一条目为 69 字节 `0001.png`。`js-source.json` 的 `<js>result</js>` 正文规则也通过设备探针四阶段。两者仍是本地合成规则；Rhino 特殊 Unicode 转义标识符路径未覆盖。
+- CBZ 下载改为先在应用缓存目录暂存并验证全部图片，再向系统文件写入 ZIP。API 23 上重装新版后再次下载合成漫画，194 字节 ZIP 校验通过，缓存目录无遗留暂存文件；离线测试还覆盖第二张图 HTTP 503 和暂存容量超限时，最终输出保持 0 字节。
+- 同轮 `./gradlew test :source-catalog:checkCatalogConfig :app:lintDebug :app:assembleDebug :app:assembleRelease --offline --warning-mode all --console=plain` 通过，配置检查覆盖 14 个订阅。API 37 首页的状态栏边距、书源选择器可点击性及更紧凑的搜索结果由模拟器复核。
+
+## 2026-09-27 工程整理回归
+
+运行 `./gradlew test :source-catalog:checkCatalogConfig :app:assembleDebug :app:assembleRelease --offline --warning-mode all` 通过；联网补齐本机缺少的 Lint 依赖后，Release 构建也单独通过。配置校验覆盖仓库内 14 个订阅定义，不依赖被 Git 忽略的本地快照。新增反例覆盖超大订阅响应、HTTP 响应上限、最后一章抓取时取消不能进入导出，以及 `java.head` 的请求方法、请求头和不跟随跳转。
+
+安装新版 Debug APK 后，模拟器 `emulator-5554` 的 MainActivity 正常启动。用 `test-fixtures/http/source.json` 在设备探针复测，依次得到 `SEARCH_OK hits=1`、`DETAIL_OK`、`CATALOG_OK chapters=2`、`CONTENT_OK`。这一轮只验证本地合成站点的单章路径；文件选择器的真实进程回收和完整导出 UI 仍以此前记录及离线测试为依据。
+
 妙公子搜索引擎合集 6 条源的快照、规则回归、JVM/Android 实站边界见[专项记录](miaogongzi-search-engine-compatibility-20260927.md)。
 
 2026-09-26，针对本仓库提交的 `test-fixtures/http/` 合成站点：

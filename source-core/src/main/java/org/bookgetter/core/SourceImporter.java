@@ -15,9 +15,9 @@ import static org.bookgetter.core.Models.*;
 public final class SourceImporter {
     private static final Pattern HOST_CALL = Pattern.compile("\\bjava\\.([A-Za-z_$][A-Za-z0-9_$]*)\\s*\\(");
     private static final Set<String> PROVIDED_HOST = Set.of("ajax", "put", "md5Encode", "base64Encode", "timeFormatUTC", "t2s");
-    private static final Set<String> PARTIAL_HOST = Set.of("get", "post", "getString", "getStringList", "getElement",
+    private static final Set<String> PARTIAL_HOST = Set.of("get", "post", "head", "getString", "getStringList", "getElement",
             "getElements", "setContent", "toast", "longToast", "startBrowserAwait",
-            "base64Decode", "encodeURI");
+            "base64Decode", "encodeURI", "log");
     private SourceImporter() {}
 
     public static ImportResult parse(String text) {

@@ -10,6 +10,7 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceResponse;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
@@ -21,6 +22,7 @@ import org.bookgetter.core.Models.*;
 import org.bookgetter.core.Transport;
 import org.bookgetter.core.WebContentTransport;
 import org.bookgetter.core.ResponseSignals;
+import org.bookgetter.core.ResponseTooLargeException;
 
 /** HTTP and WebView share Android's per-domain CookieManager. Call on a worker thread. */
 public final class AndroidTransport implements WebContentTransport {
@@ -79,6 +81,9 @@ public final class AndroidTransport implements WebContentTransport {
                             webView.evaluateJavascript(expression, html -> {
                                 try {
                                     String decoded = new com.google.gson.Gson().fromJson(html, String.class);
+                                    if (decoded != null && (decoded.length() > HttpSourceTransport.MAX_RESPONSE_BYTES
+                                            || decoded.getBytes(StandardCharsets.UTF_8).length > HttpSourceTransport.MAX_RESPONSE_BYTES))
+                                        throw new ResponseTooLargeException(HttpSourceTransport.MAX_RESPONSE_BYTES);
                                     if (completed.compareAndSet(false, true))
                                         result.set(new FetchResponse(url, decoded == null ? "" : decoded, 200, Map.of()));
                                 } catch (Exception e) {

@@ -1,6 +1,6 @@
 # 11 条书源跨站兼容诊断
 
-快照：`20260926-152117-ccb9324c`。样本来自[吉的书源集](https://source.jwyihao.top/)的 9 个原始文件，经 `source-catalog` 按书源 URL 去重为 11 条。本文件记录的是当前 Java 工程的兼容诊断，不复制第三方完整书源，也不把站点不可达误判为规则错误。
+快照：`20260926-152117-ccb9324c`。样本来自[吉的书源集](https://source.jwyihao.top/)的 9 个原始文件，经 `source-catalog` 按书源 URL 去重为 11 条。本文件保留当时的诊断过程；实现状态以[能力矩阵](compatibility.md)和当前测试为准，不复制第三方完整书源，也不把站点不可达误判为规则错误。
 
 ## 2026-09-27 单词低频探针
 
@@ -26,16 +26,16 @@
 
 | 类别 | 当前书源用到的调用 | 兼容测试方向 |
 | --- | --- | --- |
-| DOM/规则 | `java.getElement/getElements/getString/setContent` | 已有 HTML 列表、`setContent`、字段提取的合成回归；当前只把元素作为 HTML 字符串数组暴露，尚非官方完整 `Elements`/对象模型，也未覆盖 JSON/正则 DOM 宿主组合 |
+| DOM/规则 | `java.getElement/getElements/getString/setContent` | 已有 HTML 列表、`setContent`、字段提取及受控节点视图的合成回归；尚非官方完整 `Elements`/对象模型，也未覆盖所有 JSON/正则 DOM 宿主组合 |
 | 网络与 Cookie | `java.ajax/get/post`、`cookie.getCookie/getKey/replaceCookie` | 同站与跳转 Cookie、请求头、GBK 表单、登录态；JVM 与 Android 分别验证 |
 | 编码/资源/加密 | `java.base64Encode/base64DecodeToByteArray/cacheFile/createSymmetricCrypto/queryTTF/replaceFont` | 先按实际书源样本和官方接口定契约，不把占位返回算实现 |
-| 辅助 | `java.log/toast/sleep/toURL/timeFormatUTC/t2s/put` | 副作用、时间、繁简转换及 URL 对象要逐项测；`t2s` 目前仍是原文占位 |
+| 辅助 | `java.log/toast/sleep/toURL/timeFormatUTC/t2s/put` | `t2s` 已接入转换库与例外字典；其他副作用、时间及 URL 对象仍需逐项验证 |
 
 书源规则字段还出现 `init`、`isVolume`、`isVip`、`payAction`、`replaceRegex`、`nextContentUrl`、`subContent`、`imageDecode` 等。当前 `SourceEngine` 只执行其中一部分；`replaceRegex` 已有合并后执行和私用区字体字符的合成测试、有度首章 JVM/Android 探针，但其全字体映射未获证明。例如再漫画的 `ruleBookInfo.init` 保存 `bid` 给章节 URL 使用，目录的 `isVolume` 标注卷，这两个机制已补离线测试，真实源仍被失效详情 URL 阻断。同一简单文本源的数十本书无法覆盖这些分支。
 
-早期根据官方 `BookInfo.kt` 与 `BookChapterList.kt` 补齐了详情 `init` 先于其他字段执行、目录 `isVolume/isVip` 判断及无 URL 卷标题的稳定占位 URL；官方 `String?.isTrue` 仅把空、`null`、`false/no/not/0/0.0` 判为假。合成漫画 JSON 回归验证 `init` 保存 `bid` 后被章节 URL 使用，但再漫画真实站点仍被失效详情 URL 阻断。之后 `isVolume` 已由 rezero、`isVip` 已由黑岩公开目录各自核对，不能反推再漫画可用；`isPay` 仍未进入当前 `Chapter` 模型。
+早期根据官方 `BookInfo.kt` 与 `BookChapterList.kt` 补齐了详情 `init` 先于其他字段执行、目录 `isVolume/isVip` 判断及无 URL 卷标题的稳定占位 URL；官方 `String?.isTrue` 仅把空、`null`、`false/no/not/0/0.0` 判为假。合成漫画 JSON 回归验证 `init` 保存 `bid` 后被章节 URL 使用，但再漫画真实站点仍被失效详情 URL 阻断。之后 `isVolume` 已由 rezero、`isVip` 已由黑岩公开目录各自核对；`isPay` 已独立加入 `Chapter` 并有合成回归，真实晋江源仍未走到目录。
 
-后续优先级：先让诊断区分请求/响应语义/规则字段；对 `@@`、默认选择器链、URL 后置 JS 建回归；接着实现受控 Cookie 与规则 JS 上下文，再在 Android 环境验证 WebView/登录。每次改动都以仓库内 Legado 官方实现核对；[上游 skill](../legadoSkill/README.md) 作为案例库，其部分章节对 `nextContentUrl` 的说法互相矛盾，不能直接当作规范。批量下载已按用户纠偏停止，已有 52 本离线有效文件保留在 Git 忽略目录中，100 本仅作为后续压力/整书验收，不替代跨站兼容测试。
+历史优先级（前两项已有回归）：继续完善受控 Cookie 与规则 JS 上下文，再在 Android 环境验证 WebView/登录。每次改动都以仓库内 Legado 官方实现核对；[上游 skill](../legadoSkill/README.md) 作为案例库，其部分章节对 `nextContentUrl` 的说法互相矛盾，不能直接当作规范。批量下载已按用户纠偏停止，已有 52 本离线有效文件保留在 Git 忽略目录中，100 本仅作为后续压力/整书验收，不替代跨站兼容测试。
 
 ## 验证策略修正
 

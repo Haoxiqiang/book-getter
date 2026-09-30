@@ -3,6 +3,7 @@ package org.bookgetter.core;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
@@ -49,7 +50,7 @@ public final class RequestPlanner {
         while (placeholders.find()) {
             String expression = placeholders.group(1).trim();
             Object evaluated = expression.equals("key") && (preliminaryOptionStart < 0 || placeholders.start() < preliminaryOptionStart)
-                    ? URLEncoder.encode(key, keywordCharset)
+                    ? encode(key, keywordCharset)
                     : expression.equals("key") ? key
                     : expression.equals("page") ? page : script.evaluate(expression, bindings, source);
             String value = evaluated instanceof Number number && Double.isFinite(number.doubleValue())
@@ -143,7 +144,14 @@ public final class RequestPlanner {
 
     private static String encodeValue(String value, Charset charset) {
         if (value.matches("(?i).*(?:%[0-9a-f]{2}).*")) return value;
-        return URLEncoder.encode(value, charset);
+        return encode(value, charset);
+    }
+
+    private static String encode(String value, Charset charset) {
+        try { return URLEncoder.encode(value, charset.name()); }
+        catch (UnsupportedEncodingException impossible) {
+            throw new IllegalStateException("Unsupported charset: " + charset.name(), impossible);
+        }
     }
 
     private static String option(JsonObject object, String key, String fallback) {

@@ -3,10 +3,53 @@ package org.bookgetter.core;
 import static org.junit.jupiter.api.Assertions.*;
 import java.util.List;
 import java.util.Map;
+import java.util.ArrayList;
 import org.bookgetter.core.Models.*;
 import org.junit.jupiter.api.Test;
 
 final class SourceEngineTest {
+    @Test void javaLogReturnsInputAndWritesOnlyToOptInDebugSink() {
+        Source source = SourceImporter.parse("{\"bookSourceUrl\":\"https://books.test\"}").sources().get(0);
+        List<String> messages = new ArrayList<>();
+        RhinoRuntime runtime = new RhinoRuntime(request -> fail("No network request expected"),
+                ignored -> fail("Debug output must not go to notification"), messages::add);
+        assertEquals("next", runtime.evaluate("java.log('next')", Map.of(), source));
+        assertEquals(true, runtime.evaluate("java.log(null) === null", Map.of(), source));
+        assertEquals(List.of("https://books.test: next", "https://books.test: null"), messages);
+    }
+
+    @Test void javaGetStringListKeepsMatchesAndResolvesDistinctUrls() {
+        Source source = SourceImporter.parse("{\"bookSourceUrl\":\"https://books.test\"}").sources().get(0);
+        RhinoRuntime runtime = new RhinoRuntime(request -> fail("No network request expected"));
+        String html = "<div><a href='/one'>下载地址</a><a href='/two'>下载地址</a>"
+                + "<a href='/one'>下载地址</a><a>下载地址</a></div>";
+        Map<String, Object> bindings = Map.of("result", html, "baseUrl", "https://books.test/book/1");
+        assertEquals("https://books.test/one|https://books.test/two",
+                runtime.evaluate("java.getStringList('@text.下载地址@href', result, true).join('|')", bindings, source));
+        assertEquals("/one|/two",
+                runtime.evaluate("java.getStringList('@text.下载地址@href', result).join('|')", bindings, source));
+    }
+
+    @Test void javaGetStringListPreservesJsonPathItemBoundaries() {
+        Source source = SourceImporter.parse("{\"bookSourceUrl\":\"https://books.test\"}").sources().get(0);
+        RhinoRuntime runtime = new RhinoRuntime(request -> fail("No network request expected"));
+        String json = "{\"items\":[{\"text\":\"first\\nline\"},{\"text\":\"second\"}]}";
+        Map<String, Object> bindings = Map.of("result", json, "baseUrl", "https://books.test/");
+        assertEquals(2, ((Number) runtime.evaluate(
+                "java.getStringList('$.items[*].text', result).size()", bindings, source)).intValue());
+        assertEquals("first\nline", runtime.evaluate(
+                "java.getStringList('$.items[*].text', result).get(0)", bindings, source));
+    }
+
+    @Test void oversizedResponseKeepsStageAndFailureCode() {
+        Source source = SourceImporter.parse("{\"bookSourceUrl\":\"https://example.test\","
+                + "\"searchUrl\":\"https://example.test/search\"}").sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> { throw new ResponseTooLargeException(32 * 1024 * 1024); });
+        SourceFailure failure = assertThrows(SourceFailure.class, () -> engine.search(source, "book", 1));
+        assertEquals(Stage.SEARCH, failure.stage);
+        assertEquals("searchUrl", failure.field);
+        assertEquals("RESPONSE_TOO_LARGE", failure.code);
+    }
     @Test void crossSourceOperationsReportTheirOwnStageBeforeFetching() {
         Source source = SourceImporter.parse("{\"bookSourceUrl\":\"https://one.test\"}").sources().get(0);
         SourceEngine engine = new SourceEngine(request -> fail("Mismatched source must not issue a request"));
@@ -779,6 +822,18 @@ final class SourceEngineTest {
         assertEquals("Y", engine.content(source, book, chapter).text());
     }
 
+    @Test void contentReplacementNormalizesCrLfCrAndTerminalNewline() {
+        Source source = SourceImporter.parse("{\"bookSourceUrl\":\"https://example.test\","
+                + "\"ruleContent\":{\"content\":\"@js:result\",\"replaceRegex\":\"<js>result</js>\"}}")
+                .sources().get(0);
+        SourceEngine engine = new SourceEngine(request -> new FetchResponse(request.url(),
+                " first \r\n second \r third \n", 200, Map.of()));
+        BookHit hit = new BookHit(source.id(), "https://example.test/book", "Book", "", "", "", Kind.TEXT);
+        Chapter chapter = new Chapter(hit.url(), "https://example.test/one", "One", 0, false, false);
+        assertEquals("first\nsecond\nthird", engine.content(source,
+                new BookDetail(hit, hit.url(), List.of()), chapter).text());
+    }
+
     @Test void replacementJsCanMapPrivateUseFontCharacters() {
         Source source = SourceImporter.parse("""
             {"bookSourceUrl":"https://example.test","ruleContent":{
@@ -1165,13 +1220,42 @@ final class SourceEngineTest {
         assertTrue(diagnostics.stream().anyMatch(item -> item.code().equals("PARTIAL_JS_HOST")
                 && item.field().equals("searchUrl") && item.message().contains("get")
                 && !item.message().contains("ajax")));
-        assertTrue(diagnostics.stream().anyMatch(item -> item.code().equals("UNSUPPORTED_JS_HOST")
+        assertTrue(diagnostics.stream().anyMatch(item -> item.code().equals("PARTIAL_JS_HOST")
                 && item.field().equals("jsLib") && item.message().contains("head")));
         assertTrue(diagnostics.stream().anyMatch(item -> item.code().equals("PARTIAL_JS_HOST")
                 && item.field().equals("ruleToc.chapterList") && item.stage() == Stage.CATALOG
                 && item.message().contains("encodeURI")));
         assertTrue(diagnostics.stream().anyMatch(item -> item.code().equals("PARTIAL_JS_HOST")
                 && item.field().equals("ruleToc.chapterList") && item.message().contains("getString")));
+    }
+
+    @Test void javaHeadKeepsRedirectResponseAndRequestHeaders() {
+        Source source = SourceImporter.parse("{\"bookSourceUrl\":\"https://example.test\"}").sources().get(0);
+        java.util.concurrent.atomic.AtomicReference<FetchRequest> seen = new java.util.concurrent.atomic.AtomicReference<>();
+        RhinoRuntime runtime = new RhinoRuntime(request -> {
+            seen.set(request);
+            return new FetchResponse(request.url(), "", 302, Map.of("Location", "/next"));
+        });
+        Object value = runtime.evaluate("var r=java.head('https://example.test/check', {'X-Probe':'one'});"
+                + "r.statusCode()+'|'+r.header('location')+'|'+r.body()", Map.of(), source);
+        assertEquals("302|/next|", value);
+        assertEquals("HEAD", seen.get().method());
+        assertFalse(seen.get().followRedirects());
+        assertEquals("one", seen.get().headers().get("X-Probe"));
+        assertThrows(RuntimeException.class, () -> runtime.evaluate(
+                "java.head('https://example.test/check', {}, 1000)", Map.of(), source));
+    }
+
+    @Test void javaHeadExposesResponseCookiesWithoutFollowingRedirect() {
+        Source source = SourceImporter.parse("{\"bookSourceUrl\":\"https://books.test\"}").sources().get(0);
+        RhinoRuntime runtime = new RhinoRuntime(request -> new FetchResponse(request.url(), "", 302,
+                Map.of("Set-Cookie", "token=abc; Path=/\nsecret=101; Path=/", "Location", "/next")));
+        assertEquals("abc|101|/next", runtime.evaluate(
+                "var r=java.head('https://books.test/check',{});"
+                        + "var c=r.cookies(); c.token+'|'+c.secret+'|'+r.header('Location')",
+                Map.of(), source));
+        assertEquals("undefined", runtime.evaluate(
+                "typeof java.head('https://books.test/check',{}).cookies().getClass", Map.of(), source));
     }
 
     @Test void base64DecodeAndEncodeUriUseDocumentedStringOverloads() throws Exception {
