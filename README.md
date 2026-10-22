@@ -1,13 +1,13 @@
 # Book Getter
 
-独立的 Android 书源获取实验工程，代码使用 Java。它不包含阅读排版、TTS、本地 TXT/EPUB 解析或 MOBI 转换。用户导入自己的书源后，可以单源或多源搜索、查看详情与目录、抓取选定章节，并导出文本小说为 TXT 或 EPUB。
+独立的 Android 书源获取实验工程，代码使用 Java。它不包含阅读排版、TTS、本地 TXT/EPUB 解析或 MOBI 转换。用户导入自己的书源后，可以单源或多源搜索、查看详情与目录、抓取选定章节，并导出文本小说为 TXT 或 EPUB；也可导入独立 RSS 源，按分类或搜索浏览文章。
 
 ## 模块
 
 | 模块 | 职责 |
 | --- | --- |
-| `source-core` | 书源 JSON、预检、请求规划、CSS/XPath/JSONPath/正则/基础 JS、抓取管线、聚合搜索 |
-| `source-runtime-android` | OkHttp、WebView 与 Android CookieManager 共享登录态 |
+| `source-core` | 书源 JSON、预检、请求规划、CSS/XPath/JSONPath/正则/基础 JS、抓取管线、聚合搜索及独立 RSS 引擎 |
+| `source-runtime-android` | OkHttp、WebView、共享登录态、线性浏览器正则与 RSS 安全网页桥 |
 | `export` | UTF-8 TXT 与最小 EPUB 2 输出 |
 | `app` | 导入、手动登录、搜索、选章、缓存与导出的调试界面 |
 
@@ -21,4 +21,4 @@
 
 验证命令：`./gradlew test :source-catalog:checkCatalogConfig :app:lintDebug :app:assembleDebug :app:assembleRelease`。核心测试使用本地构造的页面；另有 [模拟器闭环记录](docs/verification.md) 和 [本地测试站点](test-fixtures/README.md)，均不依赖真实第三方网站。文档：[架构](docs/architecture.md) · [能力矩阵](docs/compatibility.md) · [后续工作](docs/remaining-work.md) · [资料与案例](docs/references.md)。
 
-App 的“URL 导入”会保存小说书源订阅地址，支持手动更新；妙公子管理页可选择下游书源合集。通用 RSS 阅读仍未实现。书源快照由[书源管理目录](source-catalog/README.md)手动维护，原始快照不纳入版本控制。当前支持边界以[能力矩阵](docs/compatibility.md)为准；历次实站探针与测试范围见[验证资料索引](docs/README.md)。
+App 的“URL 导入”会保存小说书源订阅地址，支持手动更新；妙公子管理页可选择下游书源合集。普通书源和 RSS 可以混合导入、分别保存，并在一次事务中更新订阅。首页「RSS 订阅」提供分类、搜索、文章阅读及受控网页扩展；旧 WebView 缺少安全消息能力时明确关闭原生桥。书源快照由[书源管理目录](source-catalog/README.md)手动维护，原始快照不纳入版本控制。当前支持边界以[能力矩阵](docs/compatibility.md)为准；历次实站探针与测试范围见[验证资料索引](docs/README.md)。

@@ -12,6 +12,9 @@ android {
 dependencies {
     api project(':source-core')
     implementation 'com.squareup.okhttp3:okhttp:3.14.9'
+    implementation 'androidx.webkit:webkit:1.15.0'
+    implementation 'org.jsoup:jsoup:1.23.2'
+    implementation 'com.google.re2j:re2j:1.8'
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'com.squareup.okhttp3:mockwebserver:3.14.9'
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'

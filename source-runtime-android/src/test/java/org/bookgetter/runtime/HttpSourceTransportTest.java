@@ -120,4 +120,42 @@ public final class HttpSourceTransportTest {
             assertEquals("payload", redirected.getBody().readUtf8());
         }
     }
+    @Test public void explicitTimeoutBoundsResponseWaiting() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.enqueue(new MockResponse().setHeadersDelay(1, java.util.concurrent.TimeUnit.SECONDS).setBody("late"));
+            server.start();
+            FetchRequest request = new FetchRequest(server.url("/slow").toString(), "GET", Map.of(),
+                    null, null, false, 0, true, 50);
+            assertThrows(java.io.IOException.class, () -> transport.fetch(request));
+        }
+    }
+
+    @Test public void defaultTimeoutDoesNotOverrideClientTimeout() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.enqueue(new MockResponse().setBody("ok"));
+            server.start();
+            assertEquals("ok", transport.fetch(new FetchRequest(server.url("/").toString())).body());
+        }
+    }
+
+    @Test public void interruptCancelsABlockedSocketRead() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.enqueue(new MockResponse().setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.NO_RESPONSE));
+            server.start();
+            java.util.concurrent.atomic.AtomicReference<Throwable> failure = new java.util.concurrent.atomic.AtomicReference<>();
+            Thread worker = new Thread(() -> {
+                try { transport.fetch(new FetchRequest(server.url("/blocked").toString())); }
+                catch (Throwable error) { failure.set(error); }
+            });
+            worker.start();
+            try {
+                assertNotNull(server.takeRequest(2, java.util.concurrent.TimeUnit.SECONDS));
+                worker.interrupt();
+                worker.join(2_000);
+                assertFalse("interrupted network worker remains blocked", worker.isAlive());
+                assertTrue(failure.get() instanceof java.io.IOException);
+            } finally { worker.interrupt(); worker.join(2_000); }
+        }
+    }
+
 }

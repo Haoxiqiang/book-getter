@@ -1,5 +1,18 @@
 # 书源能力矩阵（首批实现）
 
+## 2026-10-22 整体审查扩展
+
+本轮依据 `../legado` 官方源码修复模式前缀大小写、空白 URL 选项、模板展开后的查询字符集和列表逐项替换。请求新增 `timeout`（毫秒）、`followRedirects` 与 JS 请求头；脚本宿主新增有限的超时重载、响应视图、源变量/登录头持久化和 Cookie 接口，`timeFormatUTC` 按第三参数的毫秒偏移格式化。阶段与子请求共享 `concurrentRate` 和取消/超时策略；仍维持类白名单；浏览器 URL 匹配采用下述线性安全子集，普通规则正则不承诺执行期限。书籍/章节与源级变量的具体生命周期只以回归覆盖的子集为准。
+
+RSS 现有独立模型、混合导入与仓储、分类/搜索、标准 XML 与自定义列表、正文分页以及 HTML/网页/图片/视频阅读目标。BookSource 和 RssSource 即使 ID 字符串相同也分别保存；混合事务失败不只提交其中一个模型。默认 XML 不执行列表下一页；只有自定义分支过滤空标题；阅读摘要优先，不把 `ruleDescription` 和 `ruleContent` 当作互斥配置。完整边界见[RSS 说明](../skills/legado-source-compat/references/rss-compat.md)。
+
+Android RSS 网页层已接入起始页、样式、前后注入、导航过滤、资源白黑名单、有限桥、预加载与缓存。原生桥按来源/主框架/页面代次隔离；旧 WebView 和明文页面缺少安全桥前提时报告部分支持。任意原生同步回调、`addBook`、POST 导航重放、Atom、媒体流/解密、完整登录检查与封面解密仍不等价或未支持。
+
+浏览器 `ruleContent.sourceRegex` 与 RSS 资源白黑名单使用 `LinearRegex` 的 RE2/J 线性子集，保留完整匹配、前缀匹配及黑名单优先级，但不支持反向引用、环视等 Java 扩展；`sourceRegex` 明确报 `UNSUPPORTED_LINEAR_REGEX`，名单字段报告 `UNSUPPORTED_LINEAR_RESOURCE_REGEX` 并仅保留可用的字面前缀匹配。它们有输入长度、取消和匹配时间预算；普通规则选取及 `##`/`replaceRegex` 仍使用 Java 正则，不由浏览器限制推断为有界。Android ICU 会将 `CharSequence` 转为 String，故不能沿用 JVM 上的字符访问计时包装。
+
+本轮验证使用合成离线输入，**未新增真实书源或 RSS 站点通过数量**。309 项单元测试、配置检查、Lint 和 Debug/Release 构建通过；API 23/36 的合成 RSS 阶段和浏览器安全探针已分别验证，旧 provider 的原生桥明确降级。详见[验证记录](verification.md)与[实测边界](live-source-tests.md)。下方历史实站记录保持原时间与结论，不作为新增能力的实站证明。
+
+
 [扩大审查记录](broad-source-compatibility-20260927.md)验证了指定订阅的更新与实站阶段，并修复了混合无效条目导致整批导入失败、部分解析的订阅更新删除旧源、跨源错误阶段失真及首章跳到下一章后正文归属错误。
 
 妙公子“搜索引擎通用”6 条书源的[专项验证](miaogongzi-search-engine-compatibility-20260927.md)补充了名称型书源 ID、复杂 URL 模板、书籍宿主变量、Jsoup 安全视图和挑战页识别的回归。只有必应取得 9 条搜索候选，详情受挑战页阻断；该组没有正文闭环。

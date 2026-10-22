@@ -10,6 +10,7 @@ import java.io.PushbackInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.zip.ZipEntry;
@@ -23,6 +24,10 @@ import org.bookgetter.core.Models.Kind;
 import org.bookgetter.core.Models.Source;
 import org.bookgetter.core.ResponseSignals;
 import org.bookgetter.core.ImageSignatures;
+import org.bookgetter.core.SourceRequests;
+import org.bookgetter.core.SourceStateStore;
+import org.bookgetter.core.MemorySourceStateStore;
+import org.bookgetter.core.Models.FetchRequest;
 
 /** Explicit user-triggered binary download, using the same login cookies as source fetching. */
 public final class ResourceDownloader {
@@ -33,10 +38,12 @@ public final class ResourceDownloader {
     private final OkHttpClient client;
     private final File temporaryDirectory;
     private final long maxStagedBytes;
+    private final SourceStateStore states;
     public ResourceDownloader() { this(new File(System.getProperty("java.io.tmpdir", "."))); }
-    public ResourceDownloader(File temporaryDirectory) {
+    public ResourceDownloader(File temporaryDirectory) { this(temporaryDirectory, new MemorySourceStateStore()); }
+    public ResourceDownloader(File temporaryDirectory, SourceStateStore states) {
         this(new OkHttpClient.Builder().cookieJar(new SharedCookieJar()).build(), temporaryDirectory,
-                MAX_STAGED_IMAGE_BYTES);
+                MAX_STAGED_IMAGE_BYTES, states);
     }
     static ResourceDownloader withClient(OkHttpClient client) {
         return new ResourceDownloader(client, new File(System.getProperty("java.io.tmpdir", ".")),
@@ -45,7 +52,15 @@ public final class ResourceDownloader {
     static ResourceDownloader withClient(OkHttpClient client, File temporaryDirectory, long maxStagedBytes) {
         return new ResourceDownloader(client, temporaryDirectory, maxStagedBytes);
     }
+    static ResourceDownloader withClient(OkHttpClient client, File temporaryDirectory, long maxStagedBytes, SourceStateStore states) {
+        return new ResourceDownloader(client, temporaryDirectory, maxStagedBytes, states);
+    }
     private ResourceDownloader(OkHttpClient client, File temporaryDirectory, long maxStagedBytes) {
+        this(client, temporaryDirectory, maxStagedBytes, new MemorySourceStateStore());
+    }
+    private ResourceDownloader(OkHttpClient client, File temporaryDirectory, long maxStagedBytes, SourceStateStore states) {
+        if (states == null) throw new IllegalArgumentException("Source state is required");
+        this.states = states;
         if (temporaryDirectory == null || maxStagedBytes <= 0)
             throw new IllegalArgumentException("Temporary directory and staging limit are required");
         // Follow redirects ourselves so each hop gets headers for its own origin.
@@ -58,12 +73,17 @@ public final class ResourceDownloader {
     }
     private String transfer(Source source, Resource resource, Destination destination,
                             boolean closeDestination) throws IOException {
-        String target = resource.url();
+        Map<String, String> defaults = ResourceRequestHeaders.forUrl(source, resource.url());
+        FetchRequest prepared = SourceRequests.prepare(new FetchRequest(resource.url(), "GET",
+                defaults, null, null, false, 0, true, 0,
+                org.bookgetter.core.SourcePolicy.of(source).withDefaultHeaders(defaults)), states);
+        String target = prepared.url();
         for (int redirects = 0; redirects <= MAX_REDIRECTS; redirects++) {
             if (Thread.currentThread().isInterrupted()) throw new IOException("Download cancelled");
             Request.Builder request = new Request.Builder().url(target);
-            ResourceRequestHeaders.forUrl(source, target).forEach(request::header);
-            try (Response response = client.newCall(request.build()).execute()) {
+            RedirectRequestHeaders.forTarget(prepared.headers(), prepared.url(), target).forEach(request::header);
+            okhttp3.Call call = client.newCall(request.build());
+            try (CallInterruptMonitor cancellation = new CallInterruptMonitor(call); Response response = call.execute()) {
                 if (response.isRedirect()) {
                     String location = response.header("Location");
                     HttpUrl next = location == null ? null : response.request().url().resolve(location);
@@ -144,13 +164,19 @@ public final class ResourceDownloader {
                 extensions.add(extension);
             }
             if (Thread.currentThread().isInterrupted()) throw new IOException("Download cancelled");
-            ZipOutputStream zip = new ZipOutputStream(output);
-            for (int i = 0; i < files.size(); i++) {
-                zip.putNextEntry(new ZipEntry(String.format(Locale.ROOT, "%04d.%s", i + 1, extensions.get(i))));
-                try (FileInputStream input = new FileInputStream(files.get(i))) { copy(input, zip); }
-                zip.closeEntry();
+            try (ZipOutputStream zip = new ZipOutputStream(new FilterOutputStream(output) {
+                @Override public void close() throws IOException { flush(); }
+                @Override public void write(byte[] bytes, int offset, int length) throws IOException {
+                    out.write(bytes, offset, length);
+                }
+            })) {
+                for (int i = 0; i < files.size(); i++) {
+                    zip.putNextEntry(new ZipEntry(String.format(Locale.ROOT, "%04d.%s", i + 1, extensions.get(i))));
+                    try (FileInputStream input = new FileInputStream(files.get(i))) { copy(input, zip); }
+                    zip.closeEntry();
+                }
+                zip.finish(); zip.flush();
             }
-            zip.finish(); zip.flush();
         } catch (IOException | RuntimeException | Error error) {
             failure = error;
             throw error;

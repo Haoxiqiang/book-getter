@@ -1,5 +1,25 @@
 # 验证记录
 
+## 2026-10-22 整体审查与兼容扩展验收
+
+三个子任务分别实施和复审兼容性、安全、可读性/性能，主任务统一整合并串行验证。官方行为基准为 `../legado` 的 `62003ce732a7e30602754d28996da7f98b9ea296`；本轮没有新增第三方实站或整书通过数量。
+
+在 JDK 21 下运行 `./gradlew test :source-catalog:checkCatalogConfig :app:lintDebug :app:assembleDebug :app:assembleRelease --offline --console=plain`，最终通过。按单一构建配置计数为 309 项：核心 186、导出 10、目录 10、Android runtime 31、App 72；Android 模块的 Release 同类用例亦通过，不重复计入 309。目录配置校验覆盖 14 个订阅。初期 JDK 17、缺失缓存和并行 Gradle 中间失败均已解决，不作为最终结果。
+
+回归覆盖规则前缀/组合/列表替换、GBK/UTF-8/escape、请求选项与超时、头优先级、持久变量及完整 RSS 文章身份、XML/实体拒绝、混合导入原子提交与失败回滚、任务日志迁移/generation/损坏恢复、2,000 章进度不重写目录、下一章索引、缓存会话快照及新旧缓存互通。资源选择包含 5,000 个长 URL 的 token 恢复，RSS 覆盖过期任务选择和跨会话缓存拒写；TXT/EPUB/ZIP 验证调用方流所有权和异常清理。
+
+设备使用临时 Android 6/API 23 x86_64 模拟器，以及 Pixel 4/API 36，均安装本轮 Debug APK：
+
+- 标准 RSS XML 两端均返回 1 篇、摘要阅读 65 字符，`RSS_PROBE_DONE`。
+- 自定义 RSS 两端均返回 2 篇；正文请求依次访问合成第一页和第二页，合并 163 字符，`first=true final=true`。API 23 首次暴露 `StringBuilder.isEmpty()` 的 `NoSuchMethodError`，改为 `length()>0` 后已复测通过。
+- XML 首轮曾因 Android Expat 不认识 Xerces feature 而失败；改为声明预检、必需 lexical handler 拒绝 DTD及外部实体 resolver 后，两端复测通过，离线 XXE 负例仍通过。
+- API 36 浏览器探针最终 `SUMMARY pass=24 fail=0 skip=0`：主 frame 变量持久化、脚本顺序、同源/异源 iframe、旧 token、导航写入顺序、关闭排队动作、线性正则、长资源地址、字段诊断、心跳及真实请求取消/停止。
+- API 23 的旧 WebView 明确报告 `PARTIAL_WEB_BRIDGE`，不安装不安全原生桥；浏览器探针 `pass=8 fail=0 skip=1`。跳过的是需要安全消息特性的桥用例；正则、字段诊断、心跳、真实周期资源执行与取消清理均通过。取消夹具使用 ES5/图片请求，未把旧 provider 不支持 `fetch` 当作取消失败。
+- 最终 APK 在 API 23 复跑普通书源合成站点：`SEARCH_OK hits=1`、`DETAIL_OK`、`CATALOG_OK chapters=2`、`CONTENT_OK visibleCharacters=41`，确认既有基础链路未回退。
+- API 23 实际 UI 通过首页 URL 导入两条合成 RSS、打开 RSS 入口、分类列表和摘要阅读，截图确认正文可见。界面状态将桥降级解释为中文，技术字段保留在点击可见的诊断中。
+
+设备探针仅面向本地自造夹具。桥关闭用例覆盖控制器队列；已分发到 Activity 的回调通过 generation 单测约束，不宣称完成真实进程回收/所有文件提供方或所有网页功能的设备自动化。浏览器正则采用有编译和匹配预算的 RE2/J 子集；反向引用、环视明确诊断，普通规则的 Java 正则不因此获得时间上限保证。
+
 ## 2026-09-27 API 23 与图片归档回归
 
 - `./gradlew :app:lintDebug :app:assembleDebug --offline --console=plain` 通过。应用和 Android 运行库启用核心库 desugaring 后，先前由最低版本 API 23 触发的 77 项 `NewApi` 错误已消除；其余 Lint 警告不影响本次构建。

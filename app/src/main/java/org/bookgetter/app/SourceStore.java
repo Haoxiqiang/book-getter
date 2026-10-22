@@ -20,7 +20,7 @@ import org.bookgetter.core.SourceImporter;
 import org.bookgetter.core.Transport;
 
 final class SourceStore {
-    private static final Object COMMIT_LOCK = new Object();
+    static final Object COMMIT_LOCK = new Object();
     static final int MAX_SOURCE_BYTES = 16 * 1024 * 1024;
     static final int MAX_TOTAL_IMPORT_BYTES = 64 * 1024 * 1024;
     static final int MAX_IMPORT_SOURCES = 10_000;
@@ -189,6 +189,15 @@ final class SourceStore {
             return new ImportResult(new ArrayList<>(updated.values()), List.of(), diagnostics);
         }
     }
+    ImportResult importResolved(List<Source> sources, List<Diagnostic> diagnostics, String subscriptionUrl) throws Exception {
+        Map<String, Source> incoming = new LinkedHashMap<>();
+        for (Source source : sources) incoming.put(source.id(), source);
+        List<SelectedCollection> selected = subscriptionUrl == null ? List.of() : subscriptions().stream()
+                .filter(feed -> feed.url().equals(subscriptionUrl)).findFirst().map(Subscription::collections).orElse(List.of());
+        return commit(incoming, diagnostics, subscriptionUrl == null ? null
+                : new Subscription(subscriptionUrl, new LinkedHashSet<>(incoming.keySet()), selected));
+    }
+
     private ImportResult commit(Map<String, Source> incoming, List<Diagnostic> diagnostics, Subscription replacement) throws Exception {
         synchronized (COMMIT_LOCK) {
             requireActive();

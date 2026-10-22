@@ -58,16 +58,21 @@ public final class SourceCatalogManager {
             String url = feed.get("url").getAsString();
             if (!file.matches("[a-zA-Z0-9._-]+\\.json") || !names.add(file))
                 throw new IllegalArgumentException("Invalid or duplicate feed file name: " + file);
-            boolean httpAllowed = feed.has("allowHttp") && feed.get("allowHttp").getAsBoolean();
-            URI address = URI.create(url);
-            if (!(("https".equalsIgnoreCase(address.getScheme())
-                    || httpAllowed && "http".equalsIgnoreCase(address.getScheme()))
-                    && address.getHost() != null))
-                throw new IllegalArgumentException("Expected HTTPS feed or explicit allowHttp: " + url);
+            validateFeedUrl(feed);
             if (feed.has("model") && !"rss".equals(feed.get("model").getAsString()))
                 throw new IllegalArgumentException("Unknown source model: " + feed.get("model"));
         }
         System.out.println("Checked " + feeds.size() + " feed definitions");
+    }
+
+    static URI validateFeedUrl(JsonObject feed) {
+        String url = feed.get("url").getAsString();
+        boolean httpAllowed = feed.has("allowHttp") && feed.get("allowHttp").getAsBoolean();
+        URI address = URI.create(url);
+        if (!("https".equalsIgnoreCase(address.getScheme())
+                || httpAllowed && "http".equalsIgnoreCase(address.getScheme())) || address.getHost() == null)
+            throw new IllegalArgumentException("Expected HTTPS feed or explicit allowHttp: " + url);
+        return address;
     }
 
     private static void update(Path directory) throws Exception {
@@ -115,11 +120,9 @@ public final class SourceCatalogManager {
             String url = feed.get("url").getAsString();
             if (!file.matches("[a-zA-Z0-9._-]+\\.json") || !names.add(file))
                 throw new IllegalArgumentException("Invalid or duplicate feed file name: " + file);
-            boolean httpAllowed = feed.has("allowHttp") && feed.get("allowHttp").getAsBoolean();
-            if (!(url.startsWith("https://") || httpAllowed && url.startsWith("http://")))
-                throw new IllegalArgumentException("Expected HTTPS feed or explicit allowHttp: " + url);
+            URI address = validateFeedUrl(feed);
             boolean rss = feed.has("model") && feed.get("model").getAsString().equals("rss");
-            HttpRequest request = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(30))
+            HttpRequest request = HttpRequest.newBuilder(address).timeout(Duration.ofSeconds(30))
                     .header("User-Agent", "BookGetterCatalog/1.0 (manual update)").GET().build();
             HttpResponse<InputStream> response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
             byte[] bytes;

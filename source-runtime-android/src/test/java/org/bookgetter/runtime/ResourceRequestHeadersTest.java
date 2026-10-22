@@ -189,4 +189,44 @@ public final class ResourceRequestHeadersTest {
             assertEquals(0, staging.listFiles().length);
         }
     }
+    @Test public void savedSourceLoginHeadersAreAppliedOnceAndStrippedOnForeignRedirect() throws Exception {
+        try (MockWebServer origin = new MockWebServer(); MockWebServer foreign = new MockWebServer()) {
+            foreign.start();
+            foreign.enqueue(new MockResponse().setBody("file"));
+            origin.enqueue(new MockResponse().setResponseCode(307).addHeader("Location", foreign.url("/file")));
+            origin.start();
+            Source source = SourceImporter.parse("{\"bookSourceUrl\":\"" + origin.url("/") + "\"}").sources().get(0);
+            var states = new org.bookgetter.core.MemorySourceStateStore();
+            states.put(org.bookgetter.core.SourcePolicy.of(source).stateKey(), "loginHeader", "{\"X-Token\":\"saved-secret\"}");
+            var downloader = ResourceDownloader.withClient(new OkHttpClient(), temporary.newFolder(),
+                    ResourceDownloader.MAX_STAGED_IMAGE_BYTES, states);
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            downloader.download(source, new Resource(origin.url("/redirect").toString(), "File", null), output);
+            assertEquals("file", output.toString(StandardCharsets.UTF_8));
+            assertEquals("saved-secret", origin.takeRequest().getHeader("X-Token"));
+            assertNull(foreign.takeRequest().getHeader("X-Token"));
+        }
+    }
+
+    @Test public void comicZipReleasesCompressorWithoutClosingCallerStream() throws Exception {
+        byte[] png = new byte[40];
+        System.arraycopy(new byte[] {(byte) 0x89, 'P', 'N', 'G', 13, 10, 26, 10}, 0, png, 0, 8);
+        try (MockWebServer server = new MockWebServer()) {
+            server.enqueue(new MockResponse().setBody(new okio.Buffer().write(png)));
+            server.start();
+            Source images = new Source(SOURCE.id(), SOURCE.name(), Kind.IMAGE, SOURCE.json());
+            java.util.concurrent.atomic.AtomicBoolean closed = new java.util.concurrent.atomic.AtomicBoolean();
+            ByteArrayOutputStream output = new ByteArrayOutputStream() {
+                @Override public void close() { closed.set(true); }
+            };
+            ResourceDownloader.withClient(new OkHttpClient(), temporary.newFolder(), ResourceDownloader.MAX_STAGED_IMAGE_BYTES)
+                    .downloadZip(images, java.util.List.of(new Resource(server.url("/image").toString(), "Page", null)), output);
+            assertFalse(closed.get());
+            try (ZipInputStream zip = new ZipInputStream(new java.io.ByteArrayInputStream(output.toByteArray()))) {
+                assertNotNull(zip.getNextEntry());
+                assertArrayEquals(png, zip.readAllBytes());
+            }
+        }
+    }
+
 }

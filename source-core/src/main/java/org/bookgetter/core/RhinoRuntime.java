@@ -7,18 +7,15 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.security.MessageDigest;
-import java.time.Instant;
-import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
 import java.util.Base64;
 import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Arrays;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Locale;
 import java.util.function.Consumer;
 import org.bookgetter.core.Models.*;
 import org.mozilla.javascript.BaseFunction;
-import org.mozilla.javascript.ClassShutter;
 import org.mozilla.javascript.Context;
 import org.mozilla.javascript.ContextFactory;
 import org.mozilla.javascript.NativeArray;
@@ -46,16 +43,36 @@ public final class RhinoRuntime implements ScriptRuntime {
     private final Consumer<String> notification;
     private final Consumer<String> debugLog;
     private final Gson gson = new Gson();
-    private final Map<String, Map<String, String>> sourceVariables = new ConcurrentHashMap<>();
+    private final SourceStateStore states;
+    private final CookieAccess cookies;
+    @FunctionalInterface public interface HostFunction { Object call(List<String> arguments) throws Exception; }
+    private final ThreadLocal<Map<String, HostFunction>> hostFunctions = new ThreadLocal<>();
     private final ThreadLocal<Map<String, Object>> currentBook = new ThreadLocal<>();
     public RhinoRuntime(Transport transport) { this(transport, ignored -> {}); }
     public RhinoRuntime(Transport transport, Consumer<String> notification) {
         this(transport, notification, ignored -> {});
     }
     public RhinoRuntime(Transport transport, Consumer<String> notification, Consumer<String> debugLog) {
+        this(transport, notification, debugLog, new MemorySourceStateStore(), CookieAccess.NONE);
+    }
+
+    public RhinoRuntime(Transport transport, Consumer<String> notification, Consumer<String> debugLog,
+                        SourceStateStore states, CookieAccess cookies) {
+        this.states = java.util.Objects.requireNonNull(states);
+        this.cookies = java.util.Objects.requireNonNull(cookies);
         this.transport = transport;
         this.notification = notification;
         this.debugLog = debugLog;
+    }
+
+    public SourceStateStore stateStore() { return states; }
+    public FetchResponse fetch(FetchRequest request) throws Exception {
+        return transport.fetch(SourceRequests.prepare(request, states));
+    }
+
+    private static String sourceKey(Source source) {
+        SourcePolicy policy = SourcePolicy.of(source);
+        return policy == null ? "book\u0000" : policy.stateKey();
     }
 
     @Override public void enterBook(Map<String, Object> book) {
@@ -74,11 +91,20 @@ public final class RhinoRuntime implements ScriptRuntime {
         if (state == null || !(state.get("variables") instanceof Map<?, ?> variables)) return Map.of();
         Map<String, String> result = new LinkedHashMap<>();
         variables.forEach((key, value) -> result.put(String.valueOf(key), String.valueOf(value)));
+        result.putAll(RuleBindings.currentBook());
         return result;
     }
     @Override public boolean reverseToc() {
         Map<String, Object> state = currentBook.get();
         return state != null && Boolean.TRUE.equals(state.get("reverseToc"));
+    }
+
+    public Object evaluateWithHost(String script, Map<String, Object> bindings, Source source,
+                                   Map<String, HostFunction> functions) {
+        Map<String, HostFunction> previous = hostFunctions.get();
+        hostFunctions.set(Map.copyOf(functions));
+        try { return run(script, bindings, source); }
+        finally { if (previous == null) hostFunctions.remove(); else hostFunctions.set(previous); }
     }
 
     @Override public Object evaluate(String script, Map<String, Object> bindings, Source source) {
@@ -108,7 +134,7 @@ public final class RhinoRuntime implements ScriptRuntime {
             cx.setOptimizationLevel(-1);
             cx.setInstructionObserverThreshold(10_000);
             cx.setLanguageVersion(Context.VERSION_ES6);
-            cx.setClassShutter(fullName -> false);
+            if (outermost) cx.setClassShutter(fullName -> false);
             ScriptableObject scope = cx.initSafeStandardObjects();
             Scriptable java = cx.newObject(scope);
             IdentityHashMap<Scriptable, Object> nativeViews = new IdentityHashMap<>();
@@ -136,7 +162,7 @@ public final class RhinoRuntime implements ScriptRuntime {
             });
             Object[] ruleContent = {bindings.getOrDefault("result", "")};
             String ruleBaseUrl = String.valueOf(bindings.getOrDefault("baseUrl", source == null ? "" : source.id()));
-            RuleEvaluator hostRules = new RuleEvaluator(this);
+            RuleEvaluator hostRules = new RuleEvaluator(this, states);
             ScriptableObject.putProperty(java, "setContent", new BaseFunction() {
                 @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
                     if (args.length == 0 || args[0] == null || args[0] == Undefined.instance)
@@ -174,7 +200,7 @@ public final class RhinoRuntime implements ScriptRuntime {
                     String rule = args.length == 0 ? "" : Context.toString(args[0]);
                     Object input = args.length > 1 && args[1] != Undefined.instance
                             ? Context.toString(args[1]) : ruleContent[0];
-                    return hostRules.one(rule, input, ruleBaseUrl, source, false);
+                    return hostRules.one(rule, input, ruleBaseUrl, source, args.length > 2 && Context.toBoolean(args[2]));
                 }
             });
             ScriptableObject.putProperty(java, "getStringList", new BaseFunction() {
@@ -234,7 +260,7 @@ public final class RhinoRuntime implements ScriptRuntime {
                 @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
                     String url = args.length == 0 ? "" : Context.toString(args[0]);
                     try {
-                        FetchResponse response = transport.fetch(nestedRequest(url, bindings, source));
+                        FetchResponse response = transport.fetch(SourceRequests.prepare(nestedRequest(url, bindings, source), states));
                         String quality = ResponseSignals.quality(response);
                         if (quality.equals("CHALLENGE_PAGE"))
                             throw new IllegalStateException("Nested request returned CHALLENGE_PAGE");
@@ -246,15 +272,15 @@ public final class RhinoRuntime implements ScriptRuntime {
             ScriptableObject.putProperty(java, "post", new BaseFunction() {
                 @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
                     if (args.length < 2) throw Context.reportRuntimeError("java.post requires URL and body");
-                    if (args.length > 3) throw Context.reportRuntimeError("java.post timeout overload is unavailable");
+                    if (args.length > 4) throw Context.reportRuntimeError("Invalid java.post overload");
                     String url = Context.toString(args[0]);
                     String body = Context.toString(args[1]);
                     Map<String, String> headers = requestHeaders(args.length > 2 ? args[2] : null);
                     if (headers.keySet().stream().noneMatch(name -> name.equalsIgnoreCase("Content-Type")))
                         headers.put("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
                     try {
-                        FetchResponse response = transport.fetch(new FetchRequest(url, "POST", headers,
-                                body, null, false, 0, false));
+                        FetchResponse response = transport.fetch(SourceRequests.prepare(new FetchRequest(url, "POST", headers,
+                                body, null, false, 0, false).forSource(source).withTimeout(timeout(args, 3)), states));
                         return responseView(context, scope, response);
                     } catch (Exception e) { throw Context.throwAsScriptRuntimeEx(e); }
                 }
@@ -262,12 +288,12 @@ public final class RhinoRuntime implements ScriptRuntime {
             ScriptableObject.putProperty(java, "head", new BaseFunction() {
                 @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
                     if (args.length == 0) throw Context.reportRuntimeError("java.head requires URL");
-                    if (args.length > 2) throw Context.reportRuntimeError("java.head timeout overload is unavailable");
+                    if (args.length > 3) throw Context.reportRuntimeError("Invalid java.head overload");
                     String url = Context.toString(args[0]);
                     Map<String, String> headers = requestHeaders(args.length > 1 ? args[1] : null);
                     try {
-                        FetchResponse response = transport.fetch(new FetchRequest(url, "HEAD", headers,
-                                null, null, false, 0, false));
+                        FetchResponse response = transport.fetch(SourceRequests.prepare(new FetchRequest(url, "HEAD", headers,
+                                null, null, false, 0, false).forSource(source).withTimeout(timeout(args, 2)), states));
                         return responseView(context, scope, response);
                     } catch (Exception e) { throw Context.throwAsScriptRuntimeEx(e); }
                 }
@@ -276,8 +302,12 @@ public final class RhinoRuntime implements ScriptRuntime {
                 @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
                     String key = args.length > 0 ? Context.toString(args[0]) : "";
                     String value = args.length > 1 ? Context.toString(args[1]) : "";
-                    sourceVariables.computeIfAbsent(source == null ? "" : source.id(), unused -> new ConcurrentHashMap<>())
-                            .put(key, value);
+                    if (!RuleBindings.hasFrame(source) && currentBook.get() != null) {
+                        states.put(sourceKey(source), bookStateKey(key), value);
+                        @SuppressWarnings("unchecked") Map<String, String> variables =
+                                (Map<String, String>) currentBook.get().get("variables");
+                        variables.put(key, value);
+                    } else RuleBindings.put(states, source, key, value);
                     return value;
                 }
             });
@@ -285,16 +315,12 @@ public final class RhinoRuntime implements ScriptRuntime {
                 @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
                     String url = args.length == 0 ? "" : Context.toString(args[0]);
                     if (args.length < 2 && !url.startsWith("http://") && !url.startsWith("https://"))
-                        return sourceVariables.getOrDefault(source == null ? "" : source.id(), Map.of()).getOrDefault(url, "");
+                        return variable(source, url);
                     try {
-                        FetchResponse response = transport.fetch(nestedRequest(url, bindings, source));
-                        Scriptable result = context.newObject(scope);
-                        ScriptableObject.putProperty(result, "body", new BaseFunction() {
-                            @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
-                                return response.body();
-                            }
-                        });
-                        return result;
+                        Map<String, String> headers = requestHeaders(args.length > 1 ? args[1] : null);
+                        FetchResponse response = transport.fetch(SourceRequests.prepare(new FetchRequest(url, "GET", headers,
+                                null, null, false, 0, false).forSource(source).withTimeout(timeout(args, 2)), states));
+                        return responseView(context, scope, response);
                     } catch (Exception e) { throw Context.throwAsScriptRuntimeEx(e); }
                 }
             });
@@ -309,10 +335,13 @@ public final class RhinoRuntime implements ScriptRuntime {
                 @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
                     long epochMillis = (long) Context.toNumber(args[0]);
                     String pattern = args.length > 1 ? Context.toString(args[1]) : "yyyy-MM-dd HH:mm:ss";
-                    return DateTimeFormatter.ofPattern(pattern)
-                            .withZone(ZoneOffset.UTC).format(Instant.ofEpochMilli(epochMillis));
+                    int shift = args.length > 2 ? (int) Context.toNumber(args[2]) : 0;
+                    java.text.SimpleDateFormat format = new java.text.SimpleDateFormat(pattern, Locale.getDefault());
+                    format.setTimeZone(new java.util.SimpleTimeZone(shift, "UTC"));
+                    return format.format(new java.util.Date(epochMillis));
                 }
             });
+            RhinoSourceBindings.installCookies(cx, scope, java, cookies);
             ScriptableObject.putProperty(scope, "java", java);
             if (source != null) {
                 bind(cx, scope, "source", source.json(), nativeViews);
@@ -322,12 +351,7 @@ public final class RhinoRuntime implements ScriptRuntime {
                         return source.id();
                     }
                 });
-                ScriptableObject.putProperty(sourceObject, "getLoginHeader", new BaseFunction() {
-                    @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
-                        return null;
-                    }
-                });
-                ScriptableObject.putProperty(sourceObject, "getVariable", emptyStringFunction());
+                RhinoSourceBindings.installSourceState(cx, scope, sourceObject, source, states, cookies);
                 ScriptableObject.putProperty(sourceObject, "key", source.id());
             }
             // Explicit mainJs arguments take precedence over the enclosing ordinary-rule context.
@@ -345,7 +369,8 @@ public final class RhinoRuntime implements ScriptRuntime {
                 ScriptableObject.putProperty(bookObject, "getVariable", new BaseFunction() {
                     @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
                         String key = args.length == 0 ? "" : Context.toString(args[0]);
-                        return bookVariables().getOrDefault(key, "");
+                        String value = RuleBindings.snapshot(states, source, RuleBindings.bookPrefix(source, bookUrl())).get(key);
+                        return value == null ? bookVariables().getOrDefault(key, states.get(sourceKey(source), bookStateKey(key))) : value;
                     }
                 });
                 ScriptableObject.putProperty(bookObject, "putVariable", new BaseFunction() {
@@ -356,8 +381,12 @@ public final class RhinoRuntime implements ScriptRuntime {
                         @SuppressWarnings("unchecked") Map<String, String> variables =
                                 (Map<String, String>) state.get("variables");
                         String key = Context.toString(args[0]);
-                        if (args[1] == null || args[1] == Undefined.instance) return variables.remove(key) != null;
+                        if (args[1] == null || args[1] == Undefined.instance) {
+                            RuleBindings.putBook(states, source, bookUrl(), key, null);
+                            return variables.remove(key) != null;
+                        }
                         variables.put(key, Context.toString(args[1]));
+                        RuleBindings.putBook(states, source, bookUrl(), key, Context.toString(args[1]));
                         return true;
                     }
                 });
@@ -375,6 +404,32 @@ public final class RhinoRuntime implements ScriptRuntime {
                     }
                 });
             }
+            Object article = ScriptableObject.getProperty(scope, "rssArticle");
+            if (article instanceof Scriptable articleObject) {
+                ScriptableObject.putProperty(articleObject, "getVariable", new BaseFunction() {
+                    public Object call(Context context, Scriptable callScope, Scriptable self, Object[] args) {
+                        Map<String, String> values = RuleBindings.item();
+                        return args.length == 0 ? gson.toJson(values) : values.getOrDefault(arg(args, 0), "");
+                    }
+                });
+                ScriptableObject.putProperty(articleObject, "putVariable", new BaseFunction() {
+                    public Object call(Context context, Scriptable callScope, Scriptable self, Object[] args) {
+                        if (args.length < 2) throw Context.reportRuntimeError("rssArticle.putVariable requires key and value");
+                        RuleBindings.put(states, source, arg(args, 0), args[1] == null || args[1] == Undefined.instance ? null : arg(args, 1));
+                        return true;
+                    }
+                });
+            }
+            Map<String, HostFunction> functions = hostFunctions.get();
+            if (functions != null) functions.forEach((name, function) -> ScriptableObject.putProperty(java, name, new BaseFunction() {
+                @Override public Object call(Context context, Scriptable callScope, Scriptable thisObj, Object[] args) {
+                    if (args.length > 4) throw Context.reportRuntimeError("Too many host arguments");
+                    List<String> values = Arrays.stream(args).map(value ->
+                            value == null || value == Undefined.instance ? "" : Context.toString(value)).toList();
+                    try { return function.call(values); }
+                    catch (Exception error) { throw Context.throwAsScriptRuntimeEx(error); }
+                }
+            }));
             String library = source == null ? null : source.string("jsLib");
             if (library != null && !library.isBlank()) cx.evaluateString(scope, library, "book-source-library", 1, null);
             Object result = cx.evaluateString(scope, code, "book-source", 1, null);
@@ -389,6 +444,40 @@ public final class RhinoRuntime implements ScriptRuntime {
             Context.exit();
             if (outermost) DEADLINE.remove();
         }
+    }
+
+    private static long timeout(Object[] args, int index) {
+        if (args.length <= index || args[index] == null || args[index] == Undefined.instance) return 30000;
+        double value = Context.toNumber(args[index]);
+        if (!Double.isFinite(value) || value <= 0 || value > Integer.MAX_VALUE)
+            throw Context.reportRuntimeError("Invalid request timeout");
+        return (long) value;
+    }
+
+    private String bookUrl() {
+        Map<String, Object> book = currentBook.get();
+        return String.valueOf(book == null ? "" : book.getOrDefault("bookUrl", book.getOrDefault("url", "")));
+    }
+    private String bookStateKey(String key) { return "book:" + bookUrl() + "\u0000" + key; }
+
+    private String variable(Source source, String key) {
+        String metadata = RuleBindings.metadataValue(source, key);
+        if (metadata != null) return metadata;
+        String scoped = RuleBindings.scoped(source, key);
+        if (!scoped.isEmpty()) return scoped;
+        Map<String, Object> book = currentBook.get();
+        if (key.equals("bookName") && book != null && book.get("name") != null) return String.valueOf(book.get("name"));
+        String local = bookVariables().get(key);
+        if (local != null && !local.isEmpty()) return local;
+        if (currentBook.get() != null) {
+            local = states.get(sourceKey(source), bookStateKey(key));
+            if (!local.isEmpty()) return local;
+        }
+        return RuleBindings.get(states, source, key);
+    }
+
+    static String arg(Object[] args, int index) {
+        return args.length <= index || args[index] == null || args[index] == Undefined.instance ? "" : Context.toString(args[index]);
     }
 
     private static void installJsoupFacade(Context context, ScriptableObject scope,
@@ -423,7 +512,7 @@ public final class RhinoRuntime implements ScriptRuntime {
         };
     }
 
-    private static Map<String, String> requestHeaders(Object input) {
+    static Map<String, String> requestHeaders(Object input) {
         Map<String, String> headers = new LinkedHashMap<>();
         if (input == null || input == Undefined.instance) return headers;
         if (input instanceof CharSequence text) {
@@ -654,7 +743,7 @@ public final class RhinoRuntime implements ScriptRuntime {
         return view;
     }
 
-    private static BaseFunction stringMethod(java.util.function.Supplier<String> action) {
+    static BaseFunction stringMethod(java.util.function.Supplier<String> action) {
         return new BaseFunction() {
             @Override public Object call(Context context, Scriptable scope, Scriptable thisObj, Object[] args) {
                 return action.get();

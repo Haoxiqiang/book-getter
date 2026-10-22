@@ -8,15 +8,21 @@ import org.bookgetter.core.Models.*;
 final class StageFetcher {
     private final Transport transport;
     private final Consumer<StageTrace> traces;
+    private final SourceStateStore states;
 
     StageFetcher(Transport transport, Consumer<StageTrace> traces) {
+        this(transport, traces, new MemorySourceStateStore());
+    }
+
+    StageFetcher(Transport transport, Consumer<StageTrace> traces, SourceStateStore states) {
+        this.states = states;
         this.transport = transport;
         this.traces = traces;
     }
 
     FetchResponse fetch(FetchRequest request, Stage stage, String sourceId, String field) {
         FetchResponse response;
-        try { response = transport.fetch(request); }
+        try { response = transport.fetch(SourceRequests.prepare(request, states)); }
         catch (WebContentTransport.HttpStatusException e) {
             throw browserStatusFailure(request, stage, sourceId, field, e);
         }
@@ -44,7 +50,7 @@ final class StageFetcher {
             throw new SourceFailure(Stage.CONTENT, source.id(), browserField,
                     "UNSUPPORTED", "Content rule requires a browser transport");
         try {
-            FetchResponse response = browser.fetchContent(request, sourceRegex, webJs);
+            FetchResponse response = browser.fetchContent(SourceRequests.prepare(request, states), sourceRegex, webJs);
             trace(request, response, Stage.CONTENT, source.id(), "ruleContent.content");
             validateResponse(response, request, Stage.CONTENT, source.id(), "ruleContent.content");
             return response;

@@ -9,7 +9,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.xml.xpath.XPathConstants;
@@ -28,35 +27,33 @@ public final class RuleEvaluator {
     private static final Pattern JSON_INNER = Pattern.compile("\\{(\\$\\.[^{}]+)\\}");
     private static final Pattern BRACKET_INDEX = Pattern.compile("^(.*?)(!)?\\[([\\d\\s,:-]+)\\]$");
     private final ScriptRuntime script;
-    private record ScopeKey(String sourceId, String bookUrl) {}
-    private final Map<ScopeKey, Map<String, String>> variables = new ConcurrentHashMap<>();
-    private final ThreadLocal<ScopeKey> scope = new ThreadLocal<>();
-    private final ThreadLocal<Map<String, String>> searchItemVariables = new ThreadLocal<>();
-    public RuleEvaluator(ScriptRuntime script) { this.script = script; }
+    private final SourceStateStore states;
+    public RuleEvaluator(ScriptRuntime script) { this(script, new MemorySourceStateStore()); }
+    public RuleEvaluator(ScriptRuntime script, SourceStateStore states) {
+        this.script = script;
+        this.states = states;
+    }
 
     public void enterBook(Source source, String bookUrl, Map<String, String> inherited) {
-        // Multiple imported sources may use the same detail URL but carry different rule variables.
-        ScopeKey key = new ScopeKey(source.id(), bookUrl);
-        scope.set(key);
-        if (inherited != null && !inherited.isEmpty())
-            variables.computeIfAbsent(key, ignored -> new ConcurrentHashMap<>()).putAll(inherited);
+        RuleBindings.enter(states, source, RuleBindings.bookPrefix(source, bookUrl), inherited);
     }
-    public void leaveBook() { scope.remove(); }
+    public void leaveBook() { RuleBindings.leave(); }
+    public void metadata(Source source, Map<String, String> values) { RuleBindings.metadata(source, values); }
+    public void enterChapter(Source source, String bookUrl, String chapterUrl) {
+        RuleBindings.enter(states, source, "chapter:" + bookUrl + "\u0000" + chapterUrl + "\u0000", Map.of());
+    }
+    public void leaveChapter() { RuleBindings.leave(); }
     public Map<String, String> bookVariables(Source source, String bookUrl) {
-        Map<String, String> current = variables.get(new ScopeKey(source.id(), bookUrl));
-        return current == null ? Map.of() : Map.copyOf(current);
+        return RuleBindings.snapshot(states, source, RuleBindings.bookPrefix(source, bookUrl));
     }
-    public void enterSearchItem() { searchItemVariables.set(new java.util.LinkedHashMap<>()); }
-    public Map<String, String> searchItemVariables() {
-        Map<String, String> current = searchItemVariables.get();
-        return current == null ? Map.of() : Map.copyOf(current);
-    }
-    public void leaveSearchItem() { searchItemVariables.remove(); }
+    public void enterSearchItem() { RuleBindings.enterItem(); }
+    public Map<String, String> searchItemVariables() { return RuleBindings.item(); }
+    public void leaveSearchItem() { RuleBindings.leave(); }
 
     /** Detail init follows Legado getElement: keep a JSON object or DOM node structured. */
     public Object element(String rule, Object input, String baseUrl, Source source) {
         if (rule == null || rule.isBlank()) return input;
-        String value = rule.trim();
+        String value = RuleSyntax.normalizePrefix(rule);
         if (value.startsWith("@json:") || value.startsWith("$.") || value.startsWith("$[")) {
             String path = value.startsWith("@json:") ? value.substring(6) : value;
             try { return JsonPath.read(input instanceof String ? (String) input : new com.google.gson.Gson().toJson(input), path); }
@@ -68,16 +65,11 @@ public final class RuleEvaluator {
         return found.size() == 1 ? found.get(0) : found;
     }
 
-    private Map<String, String> variables(Source source) {
-        Map<String, String> item = searchItemVariables.get();
-        if (item != null) return item;
-        return variables.computeIfAbsent(scope.get() == null ? new ScopeKey(source.id(), "") : scope.get(),
-                ignored -> new ConcurrentHashMap<>());
-    }
+    private Map<String, String> variables(Source source) { return RuleBindings.view(states, source); }
 
     public List<Object> many(String rule, Object input, String baseUrl, Source source) {
         if (rule == null || rule.isBlank()) return List.of();
-        String value = rule.trim();
+        String value = RuleSyntax.normalizePrefix(rule);
         if (value.startsWith("@@")) value = value.substring(2);
         int embeddedScript = value.indexOf("<js>");
         if (embeddedScript > 0) {
@@ -102,7 +94,7 @@ public final class RuleEvaluator {
         int chainedJs = value.indexOf("\n@js:");
         if (chainedJs > 0) {
             List<Object> initial = many(value.substring(0, chainedJs), input, baseUrl, source);
-            return normalize(script.evaluate(value.substring(chainedJs + 5), Map.of("result", initial.stream().map(Object::toString).toList(), "baseUrl", baseUrl), source));
+            return normalize(script.evaluate(value.substring(chainedJs + 5), Map.of("result", initial, "baseUrl", baseUrl), source));
         }
         if (value.startsWith("@js:")) return normalizeScript(script.evaluate(value.substring(4), Map.of("result", scriptInput(input), "baseUrl", baseUrl), source));
         Combination combination = combination(value);
@@ -172,7 +164,12 @@ public final class RuleEvaluator {
 
     public String one(String rule, Object input, String baseUrl, Source source, boolean url) {
         if (rule == null || rule.isBlank()) return "";
-        String value = rule.trim();
+        String value = RuleSyntax.normalizePrefix(rule);
+        Matcher directGet = GET.matcher(value);
+        if (directGet.matches()) {
+            String found = variable(source, directGet.group(1));
+            return url && !found.isBlank() ? absolute(baseUrl, found) : found;
+        }
         if (!value.startsWith("@js:") && !value.startsWith("<js>")) {
             value = expandGets(value, source);
             if (value.isBlank()) return "";
@@ -304,7 +301,29 @@ public final class RuleEvaluator {
     /** String-list extraction keeps DOM matches separate, as AnalyzeRule.getStringList does. */
     public List<String> stringList(String rule, Object input, String baseUrl, Source source, boolean url) {
         if (rule == null || rule.isBlank()) return List.of();
-        String value = rule.trim();
+        String value = RuleSyntax.normalizePrefix(rule);
+        // Replacements operate on individual values before URL resolution/deduplication.
+        // Going through one() would join JSON values and split embedded newlines.
+        int replacementAt = RuleSyntax.replacementStart(value);
+        if (replacementAt >= 0) {
+            String[] replacement = value.substring(replacementAt).split("##", -1);
+            List<String> replaced = new ArrayList<>();
+            for (String item : stringList(value.substring(0, replacementAt), input, baseUrl, source, false))
+                replaced.add(replaceRule(item, replacement));
+            return normalizeStringList(replaced, baseUrl, url);
+        }
+        Combination combined = combination(value);
+        if (combined != null) {
+            List<List<String>> branches = new ArrayList<>();
+            for (String part : combined.parts()) {
+                List<String> found = stringList(part, input, baseUrl, source, false);
+                if (found.stream().anyMatch(item -> !item.isBlank())) {
+                    branches.add(found);
+                    if (combined.operator().equals("||")) break;
+                }
+            }
+            return normalizeStringList(merge(branches, combined.operator()), baseUrl, url);
+        }
         // JSONPath's result is already a list. Joining then splitting it changes items
         // that contain newlines and can create phantom URLs.
         if ((value.startsWith("@json:") || value.startsWith("$.") || value.startsWith("$["))
@@ -314,7 +333,7 @@ public final class RuleEvaluator {
             return normalizeStringList(selected, baseUrl, url);
         }
         // Other non-DOM modes still use the existing scalar evaluator's line-list contract.
-        if (value.startsWith("@js:") || value.startsWith("<js>") || value.startsWith("@xpath:")) {
+        if (value.startsWith("@js:") || value.startsWith("<js>") || value.startsWith("@xpath:") || value.startsWith("/")) {
             String result = one(value, input, baseUrl, source, false);
             return result.isEmpty() ? List.of() : normalizeStringList(List.of(result.split("\\n", -1)), baseUrl, url);
         }
@@ -372,9 +391,15 @@ public final class RuleEvaluator {
         Matcher matcher = GET.matcher(rule);
         StringBuffer expanded = new StringBuffer();
         while (matcher.find()) matcher.appendReplacement(expanded,
-                Matcher.quoteReplacement(variables(source).getOrDefault(matcher.group(1), "")));
+                Matcher.quoteReplacement(variable(source, matcher.group(1))));
         matcher.appendTail(expanded);
         return expanded.toString();
+    }
+
+    private String variable(Source source, String name) {
+        String value = variables(source).get(name);
+        if (value == null) value = states.get(SourcePolicy.of(source).stateKey(), "value:" + name);
+        return value == null ? "" : value;
     }
 
     private record Combination(String operator, List<String> parts, String suffix) {}
@@ -592,12 +617,12 @@ public final class RuleEvaluator {
     }
 
     public static String absolute(String base, String path) {
-        int optionAt = path.indexOf(",{");
+        int optionAt = RuleSyntax.urlOptionsStart(path);
         if (optionAt >= 0) {
             try { JsonParser.parseString(path.substring(optionAt + 1).trim()).getAsJsonObject(); }
             catch (Exception ignored) { optionAt = -1; }
         }
-        String raw = optionAt < 0 ? path : path.substring(0, optionAt);
+        String raw = optionAt < 0 ? path : path.substring(0, optionAt).stripTrailing();
         try {
             String resolved = URI.create(base).resolve(raw).toString();
             return optionAt < 0 ? resolved : resolved + path.substring(optionAt);

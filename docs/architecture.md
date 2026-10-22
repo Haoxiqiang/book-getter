@@ -43,3 +43,19 @@ App (导入、选择、任务与导出 UI)
 ## 扩展点
 
 媒体类型通过 `ChapterContent.kind/resources` 表示，Android 运行层提供显式触发的二进制下载，漫画图片可打包为 ZIP。`WebContentTransport` 负责 `sourceRegex` 的页面资源监听；HTTP-only 运行时明确报不支持。分段流与解密仍需单独实现。复杂 JS 宿主方法应逐项实现并在能力矩阵增加回归样本。规则表达式扩展仍位于 `RuleEvaluator`，不应在 UI 或导出层增加网站特例。
+
+## 2026-10-22 UI 与抓取存储整理
+
+`ActivityTasks` 统一持有后台任务、取消代数和过期 UI 回调检查，销毁后不再分发结果；`RunDiagnostics` 负责阶段诊断文本，界面只选择展示目标。首次书源读取在后台完成，导入完成直接复用返回的书源快照，搜索结果按预先建立的来源名称索引展示，避免在主线程重新解析整份规则。
+
+`CaptureJobStore` 保留兼容的 `capture-job.json` 静态任务快照，目录、选章与书籍上下文仅在创建或明确替换任务时写入。逐章完成数和单章错误追加到 `capture-progress.jsonl`，续跑开始以原子替换重置进度日志，完整读取任务时再重放日志。旧格式任务没有日志时仍按原快照读取。日志带任务 generation，旧任务 worker 不能写入或清除新任务；不完整的最后一条日志忽略后可续跑，中间损坏则保留任务并要求备份，备份同时保存快照与日志。`ChapterBoundaries` 在抓取和缓存导出开始时分别建立一次下一可读章索引，保持卷标题和重复相等章节的既有语义。
+
+系统文件选择器的资源 URL 列表存放在应用私有 `pending-resources` 目录，Activity 状态仅保存随机 token；选定或取消后的快照删除，未能正常返回的孤立快照七天后清理。旧版 Bundle 中的完整选择仍可迁移读取。EPUB 导出确定关闭 ZIP 压缩器，但保留调用方对最终输出流的关闭和提交责任。目录工具的配置检查与实际下载共享同一 URI 协议校验。
+
+## 2026-10-22 规则状态、请求与 RSS
+
+`RuleSyntax` 共享词法边界，`RuleBindings` 管理工作线程上的搜索项、书籍、章节和 RSS 文章作用域；`RhinoSourceBindings` 只安装源状态及 Cookie 的受控 facade。`SourcePolicy` 保留模型身份、限速和默认头来源；`SourceRequests` 对阶段、JS 子请求、资源下载及 RSS 原生 GET 应用统一策略，头优先级为默认源头、已保存登录头、显式请求头。登录头仅隐式发送到相同 origin，源 ID 的说明片段不参与 origin 判断。私有状态不进入书源 JSON，应用禁用备份。
+
+RSS 模型、导入器、引擎与仓储独立；`MixedSourceStore` 以一次持久提交发布两种模型。`RssActivity` 使用不可变阅读目标，资源与文章选择通过私有 token 恢复。预加载只预取最多两篇文章的引擎结果，不运行隐藏页面 UI 动作；缓存有总量限制，并用源快照、完整文章、结构化状态、源/文章 Cookie 和刷新版本隔离，拒绝跨会话的迟到响应。
+
+`RssWebViewController` 管理 origin、主 frame、页面 token、注入、导航与有界队列。旧 provider 不支持安全消息时不安装原生桥。浏览器 URL 正则使用有编译/匹配预算的 RE2/J 子集；普通规则正则继续保留 Java 语义。Android ICU 不支持基于 CharSequence 的合作中断，所以不能把 JVM 正则包装当作 Android 时间上限。

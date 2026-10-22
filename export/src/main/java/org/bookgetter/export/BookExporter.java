@@ -1,6 +1,7 @@
 package org.bookgetter.export;
 
 import java.io.IOException;
+import java.io.FilterOutputStream;
 import java.io.InterruptedIOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
@@ -63,31 +64,38 @@ public final class BookExporter {
     }
 
     private void writeEpub(BookDetail book, int chapterCount, ChapterLoader loader, OutputStream output) throws IOException {
-        ZipOutputStream zip = new ZipOutputStream(output);
-        byte[] mimetype = "application/epub+zip".getBytes(StandardCharsets.US_ASCII);
-        CRC32 crc = new CRC32(); crc.update(mimetype);
-        ZipEntry mime = new ZipEntry("mimetype");
-        mime.setMethod(ZipEntry.STORED); mime.setSize(mimetype.length); mime.setCompressedSize(mimetype.length); mime.setCrc(crc.getValue());
-        zip.putNextEntry(mime); zip.write(mimetype); zip.closeEntry();
-        entry(zip, "META-INF/container.xml", "<?xml version=\"1.0\" encoding=\"UTF-8\"?><container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\"><rootfiles><rootfile full-path=\"OEBPS/content.opf\" media-type=\"application/oebps-package+xml\"/></rootfiles></container>");
-        StringBuilder manifest = new StringBuilder("<item id=\"toc\" href=\"toc.ncx\" media-type=\"application/x-dtbncx+xml\"/>");
-        StringBuilder spine = new StringBuilder();
-        StringBuilder nav = new StringBuilder();
-        for (int i = 0; i < chapterCount; i++) {
-            requireActive();
-            String id = "c" + i;
-            ChapterContent chapter = requireText(loader.load(i));
-            manifest.append("<item id=\"").append(id).append("\" href=\"").append(id).append(".xhtml\" media-type=\"application/xhtml+xml\"/>");
-            spine.append("<itemref idref=\"").append(id).append("\"/>");
-            nav.append("<navPoint id=\"").append(id).append("\" playOrder=\"").append(i + 1).append("\"><navLabel><text>").append(xml(chapter.chapter().title())).append("</text></navLabel><content src=\"").append(id).append(".xhtml\"/></navPoint>");
-            StringBuilder body = new StringBuilder();
-            for (String paragraph : paragraphs(chapter.text())) body.append("<p>").append(xml(paragraph)).append("</p>");
-            entry(zip, "OEBPS/" + id + ".xhtml", "<?xml version=\"1.0\" encoding=\"UTF-8\"?><html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>" + xml(chapter.chapter().title()) + "</title></head><body><h1>" + xml(chapter.chapter().title()) + "</h1>" + body + "</body></html>");
+        // Releasing the compressor must not close the caller-owned document stream.
+        try (ZipOutputStream zip = new ZipOutputStream(new FilterOutputStream(output) {
+            @Override public void close() throws IOException { flush(); }
+            @Override public void write(byte[] bytes, int offset, int length) throws IOException {
+                out.write(bytes, offset, length);
+            }
+        })) {
+            byte[] mimetype = "application/epub+zip".getBytes(StandardCharsets.US_ASCII);
+            CRC32 crc = new CRC32(); crc.update(mimetype);
+            ZipEntry mime = new ZipEntry("mimetype");
+            mime.setMethod(ZipEntry.STORED); mime.setSize(mimetype.length); mime.setCompressedSize(mimetype.length); mime.setCrc(crc.getValue());
+            zip.putNextEntry(mime); zip.write(mimetype); zip.closeEntry();
+            entry(zip, "META-INF/container.xml", "<?xml version=\"1.0\" encoding=\"UTF-8\"?><container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\"><rootfiles><rootfile full-path=\"OEBPS/content.opf\" media-type=\"application/oebps-package+xml\"/></rootfiles></container>");
+            StringBuilder manifest = new StringBuilder("<item id=\"toc\" href=\"toc.ncx\" media-type=\"application/x-dtbncx+xml\"/>");
+            StringBuilder spine = new StringBuilder();
+            StringBuilder nav = new StringBuilder();
+            for (int i = 0; i < chapterCount; i++) {
+                requireActive();
+                String id = "c" + i;
+                ChapterContent chapter = requireText(loader.load(i));
+                manifest.append("<item id=\"").append(id).append("\" href=\"").append(id).append(".xhtml\" media-type=\"application/xhtml+xml\"/>");
+                spine.append("<itemref idref=\"").append(id).append("\"/>");
+                nav.append("<navPoint id=\"").append(id).append("\" playOrder=\"").append(i + 1).append("\"><navLabel><text>").append(xml(chapter.chapter().title())).append("</text></navLabel><content src=\"").append(id).append(".xhtml\"/></navPoint>");
+                StringBuilder body = new StringBuilder();
+                for (String paragraph : paragraphs(chapter.text())) body.append("<p>").append(xml(paragraph)).append("</p>");
+                entry(zip, "OEBPS/" + id + ".xhtml", "<?xml version=\"1.0\" encoding=\"UTF-8\"?><html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>" + xml(chapter.chapter().title()) + "</title></head><body><h1>" + xml(chapter.chapter().title()) + "</h1>" + body + "</body></html>");
+            }
+            String uid = "urn:uuid:" + UUID.nameUUIDFromBytes((nullToEmpty(book.hit().sourceId()) + "\u0000" + nullToEmpty(book.hit().url())).getBytes(StandardCharsets.UTF_8));
+            entry(zip, "OEBPS/content.opf", "<?xml version=\"1.0\" encoding=\"UTF-8\"?><package xmlns=\"http://www.idpf.org/2007/opf\" version=\"2.0\" unique-identifier=\"BookId\"><metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:identifier id=\"BookId\">" + uid + "</dc:identifier><dc:title>" + xml(book.hit().name()) + "</dc:title><dc:creator>" + xml(book.hit().author()) + "</dc:creator><dc:language>und</dc:language></metadata><manifest>" + manifest + "</manifest><spine toc=\"toc\">" + spine + "</spine></package>");
+            entry(zip, "OEBPS/toc.ncx", "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ncx xmlns=\"http://www.daisy.org/z3986/2005/ncx/\" version=\"2005-1\"><head><meta name=\"dtb:uid\" content=\"" + uid + "\"/></head><docTitle><text>" + xml(book.hit().name()) + "</text></docTitle><navMap>" + nav + "</navMap></ncx>");
+            zip.finish(); zip.flush();
         }
-        String uid = "urn:uuid:" + UUID.nameUUIDFromBytes((nullToEmpty(book.hit().sourceId()) + "\u0000" + nullToEmpty(book.hit().url())).getBytes(StandardCharsets.UTF_8));
-        entry(zip, "OEBPS/content.opf", "<?xml version=\"1.0\" encoding=\"UTF-8\"?><package xmlns=\"http://www.idpf.org/2007/opf\" version=\"2.0\" unique-identifier=\"BookId\"><metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:identifier id=\"BookId\">" + uid + "</dc:identifier><dc:title>" + xml(book.hit().name()) + "</dc:title><dc:creator>" + xml(book.hit().author()) + "</dc:creator><dc:language>und</dc:language></metadata><manifest>" + manifest + "</manifest><spine toc=\"toc\">" + spine + "</spine></package>");
-        entry(zip, "OEBPS/toc.ncx", "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ncx xmlns=\"http://www.daisy.org/z3986/2005/ncx/\" version=\"2005-1\"><head><meta name=\"dtb:uid\" content=\"" + uid + "\"/></head><docTitle><text>" + xml(book.hit().name()) + "</text></docTitle><navMap>" + nav + "</navMap></ncx>");
-        zip.finish(); zip.flush();
     }
 
     private static List<String> paragraphs(String html) {

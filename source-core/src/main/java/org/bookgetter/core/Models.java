@@ -61,7 +61,28 @@ public final class Models {
     public record Resource(String url, String title, String mimeHint) {}
     public record ChapterContent(Chapter chapter, Kind kind, String text, List<Resource> resources) {}
     public record FetchRequest(String url, String method, Map<String, String> headers, String body, String charset,
-                               boolean webView, long webViewDelayMillis, boolean followRedirects) {
+                               boolean webView, long webViewDelayMillis, boolean followRedirects,
+                               long timeoutMillis, SourcePolicy policy) {
+        public FetchRequest {
+            if (timeoutMillis < 0) throw new IllegalArgumentException("Negative request timeout");
+            headers = Map.copyOf(headers);
+        }
+        public FetchRequest(String url, String method, Map<String, String> headers, String body, String charset,
+                            boolean webView, long webViewDelayMillis, boolean followRedirects) {
+            this(url, method, headers, body, charset, webView, webViewDelayMillis, followRedirects, 0, null);
+        }
+        public FetchRequest(String url, String method, Map<String, String> headers, String body, String charset,
+                            boolean webView, long webViewDelayMillis, boolean followRedirects, long timeoutMillis) {
+            this(url, method, headers, body, charset, webView, webViewDelayMillis, followRedirects, timeoutMillis, null);
+        }
+        public FetchRequest forSource(Source source) {
+            return new FetchRequest(url, method, headers, body, charset, webView, webViewDelayMillis,
+                    followRedirects, timeoutMillis, SourcePolicy.of(source));
+        }
+        public FetchRequest withTimeout(long timeout) {
+            return new FetchRequest(url, method, headers, body, charset, webView, webViewDelayMillis,
+                    followRedirects, timeout, policy);
+        }
         public FetchRequest(String url) { this(url, "GET", Map.of(), null, null, false, 0, true); }
         public FetchRequest(String url, String method, Map<String, String> headers, String body, String charset,
                             boolean webView) { this(url, method, headers, body, charset, webView, 0, true); }

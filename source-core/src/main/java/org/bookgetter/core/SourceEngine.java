@@ -36,8 +36,10 @@ public final class SourceEngine {
     }
     public SourceEngine(Transport transport, ScriptRuntime scripts, Consumer<Diagnostic> diagnostics,
                         Consumer<StageTrace> traces) {
-        this.fetcher = new StageFetcher(transport, traces); this.scripts = scripts; this.diagnostics = diagnostics;
-        requests = new RequestPlanner(scripts); rules = new RuleEvaluator(scripts);
+        this.fetcher = new StageFetcher(transport, traces, scripts instanceof RhinoRuntime rhino
+                ? rhino.stateStore() : new MemorySourceStateStore()); this.scripts = scripts; this.diagnostics = diagnostics;
+        requests = new RequestPlanner(scripts); rules = new RuleEvaluator(scripts, scripts instanceof RhinoRuntime rhino
+                ? rhino.stateStore() : new MemorySourceStateStore());
     }
 
     /** Legado strips list-control prefixes before sending the rule to AnalyzeRule. */
@@ -193,6 +195,7 @@ public final class SourceEngine {
     public BookDetail detail(Source source, BookHit hit) {
         requireIdentity(source, hit.sourceId(), Stage.DETAIL);
         rules.enterBook(source, hit.url(), hit.variables());
+        rules.metadata(source, Map.of("bookName", hit.name() == null ? "" : hit.name()));
         scripts.enterBook(jsBook(new BookDetail(hit, hit.url(), List.of())));
         try {
             if (source.isJsSource()) return jsDetail(source, hit);
@@ -242,6 +245,7 @@ public final class SourceEngine {
         requireIdentity(source, book.hit().sourceId(), Stage.CATALOG);
         if (source.kind() == Kind.FILE) return List.of();
         rules.enterBook(source, book.hit().url(), book.hit().variables());
+        rules.metadata(source, Map.of("bookName", book.hit().name() == null ? "" : book.hit().name()));
         scripts.enterBook(jsBook(book));
         try {
             if (source.isJsSource()) return jsChapters(source, book);
@@ -308,7 +312,10 @@ public final class SourceEngine {
             throw new SourceFailure(Stage.CONTENT, source.id(), "chapter.bookUrl", "CHAPTER_BOOK_MISMATCH",
                     "Chapter belongs to another book");
         rules.enterBook(source, book.hit().url(), book.hit().variables());
+        rules.metadata(source, Map.of("bookName", book.hit().name() == null ? "" : book.hit().name()));
         scripts.enterBook(jsBook(book));
+        rules.enterChapter(source, book.hit().url(), chapter.url());
+        rules.metadata(source, Map.of("title", chapter.title() == null ? "" : chapter.title()));
         try {
             String text;
             if (source.isJsSource()) {
@@ -391,7 +398,7 @@ public final class SourceEngine {
             return new ChapterContent(chapter, source.kind(), null, resources);
         } catch (SourceFailure e) { throw e; }
         catch (Exception e) { throw new SourceFailure(Stage.CONTENT, source.id(), "ruleContent", e.getMessage(), e); }
-        finally { scripts.leaveBook(); rules.leaveBook(); }
+        finally { rules.leaveChapter(); scripts.leaveBook(); rules.leaveBook(); }
     }
 
     private List<BookHit> jsSearch(Source source, String keyword, int page) {

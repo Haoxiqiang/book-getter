@@ -1,5 +1,16 @@
 # 上游书源搜索实测（2026-09-26）
 
+## 2026-10-22 整体审查：离线新增，实站未复测
+
+官方基准：兄弟目录 `../legado` 的 `62003ce732a7e30602754d28996da7f98b9ea296`；独立 `legadoSkill` 为 `1e59ff3c1fa428a1a0981f42249fd4cf5d347644`。本次未访问新的真实书源/RSS 站点，未增加可用源、下载或整书通过数量。
+
+新增 `RuleCompatibilityRegressionTest` 覆盖模式前缀、空白 URL 选项、字符集、列表逐项替换、请求选项/JS 头及源变量回退；`SourceStateRuntimeTest` 覆盖新增持久态和宿主子集；`RssEngineTest` 覆盖独立导入、默认 XML、自定义列表、分类/搜索、摘要优先、正文分页、媒体目标、重定向基础地址及双类型分页条件；`SourceImportCoordinatorTest` 覆盖混合原子提交、嵌套清单、订阅更新/移除归属和失败回滚。浏览器来源/资源策略与正则预算另有 `RssWebPolicyTest`、`LinearRegexTest`。
+
+设备首轮暴露 Android Expat feature、Android ICU 正则计时及 API 23 `StringBuilder.isEmpty()` 差异，均已根据设备证据修正并复测。最终 309 项离线单元测试、14 订阅配置检查、Lint、Debug/Release 构建通过；API 23/36 均通过标准 XML（1 篇摘要）与自定义列表（2 篇、两页正文合并）阶段。API 36 浏览器探针 24 通过、0 失败；API 23 为 8 通过、0 失败、1 组安全消息特性缺失而跳过，明确关闭原生桥。完整执行范围和限制见[验证记录](verification.md)，不把合成通过写成真实源可用。
+
+[本地 RSS 夹具](../test-fixtures/README.md) 提供自造 RSS XML、HTML 列表、两页文章和可导入 JSON；`RssCompatibilityProbeActivity` 可经 `adb reverse` 运行文章/阅读目标阶段。它是 Android HTTP/core 探针，不执行 RSS 浏览器原生桥；WebView 注入、导航、资源过滤和桥仍需单独设备证据。禁止将本段离线结果改写为“真实 RSS 全链路通过”。
+
+
 2026-09-27 [指定《网球王子》与《全职高手》整本下载验收](target-download-20260927.md)：新增四份可更新漫画书源，包子漫画和 52 书库分别进入漫画图片与小说正文的整本下载任务。该记录以完成清单和独立离线审计为准，任务运行中的缓存不计为整本成功。
 
 2026-09-27 [指定订阅与妙公子合集扩大审查](broad-source-compatibility-20260927.md)：重新更新并校验 10 个配置文件，对用户指定 5 个订阅及下游 6 条源复测搜索到首章的最深阶段；补了混合无效条目、订阅更新回滚、跨源阶段和首章跳转边界的回归。

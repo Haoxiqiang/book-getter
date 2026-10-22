@@ -1,5 +1,8 @@
 package org.bookgetter.app;
 
+import static org.bookgetter.app.RunDiagnostics.diagnosticText;
+import static org.bookgetter.app.RunDiagnostics.formatError;
+
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ClipData;
@@ -26,9 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.bookgetter.core.Models.*;
 import org.bookgetter.core.SearchCoordinator;
 import org.bookgetter.core.SourceEngine;
@@ -40,9 +41,14 @@ import org.bookgetter.runtime.ResourceDownloader;
 /** Small inspection UI for source import, capture and export; the engine has no Activity dependency. */
 public final class MainActivity extends Activity {
     private static final int OPEN_JSON = 1, CREATE_TXT = 2, CREATE_EPUB = 3, CREATE_RESOURCE = 4;
-    private final ExecutorService io = Executors.newFixedThreadPool(5);
+    private final ActivityTasks tasks = new ActivityTasks();
     private final ExecutorService searchWorkers = Executors.newFixedThreadPool(4);
     private SourceStore sources;
+    private SourceImportCoordinator imports;
+    private boolean sourcesLoaded;
+    private record DocumentResult(int request, int result, Intent data) {}
+    private DocumentResult deferredDocument;
+    private String legacyPendingResource;
     private ChapterStore cache;
     private CaptureJobStore jobs;
     private AndroidTransport transport;
@@ -56,9 +62,9 @@ public final class MainActivity extends Activity {
     private List<Chapter> chapters = List.of();
     private BookDetail activeBook;
     private Source activeSource;
-    private Future<?> task;
-    private final AtomicInteger generation = new AtomicInteger();
-    private final ThreadLocal<Integer> workerGeneration = new ThreadLocal<>();
+    private Map<String, String> sourceNames = Map.of();
+    private PendingResourceStore pendingResourceStore;
+    private String pendingResourceToken;
     private PendingResourceDownload pendingResource;
     private PendingCaptureExport pendingCapture;
     private List<Diagnostic> importDiagnostics = List.of();
@@ -74,9 +80,12 @@ public final class MainActivity extends Activity {
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
-        sources = new SourceStore(this); cache = new ChapterStore(this); jobs = new CaptureJobStore(this);
+        sources = new SourceStore(this); imports = new SourceImportCoordinator(this); cache = new ChapterStore(this); jobs = new CaptureJobStore(this);
+        pendingResourceStore = new PendingResourceStore(getFilesDir());
         transport = new AndroidTransport(this);
-        scripts = new RhinoRuntime(transport, this::report);
+        scripts = new RhinoRuntime(transport, this::report, ignored -> {},
+                new org.bookgetter.core.FileSourceStateStore(new java.io.File(getFilesDir(), "source-state")),
+                new org.bookgetter.runtime.AndroidCookieAccess());
         LinearLayout root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(8), dp(8), dp(8), dp(8));
         root.setOnApplyWindowInsetsListener((view, insets) -> {
@@ -99,6 +108,7 @@ public final class MainActivity extends Activity {
         row(actions, button("取消", () -> cancel()), button("导出 TXT", () -> createDocument(false)));
         row(actions, button("导出 EPUB", () -> createDocument(true)), button("继续上次", () -> resumeCapture()));
         row(actions, button("资源下载", () -> prepareResources()), button("返回结果", () -> showHits()));
+        row(actions, button("RSS 订阅", () -> startActivity(new Intent(this, RssActivity.class))));
         status = new TextView(this); status.setText("导入书源后搜索");
         status.setTextSize(16); status.setMinHeight(dp(48)); status.setMaxLines(3);
         status.setPadding(dp(4), dp(8), dp(4), dp(8)); root.addView(status);
@@ -113,19 +123,17 @@ public final class MainActivity extends Activity {
         root.requestFocus();
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
                 | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
-        refreshSources();
         if (savedInstanceState != null) {
-            pendingResource = PendingResourceDownload.restore(savedInstanceState.getString("pendingResource"));
+            pendingResourceToken = savedInstanceState.getString("pendingResourceToken");
+            legacyPendingResource = savedInstanceState.getString("pendingResource");
             pendingCapture = PendingCaptureExport.restore(savedInstanceState.getString("pendingCapture"));
         }
-        try {
-            CaptureJobStore.Job saved = jobs.get();
-            if (saved != null) report("有未完成抓取：" + saved.book().hit().name() + "。点击「继续上次」复用已抓章节。");
-        } catch (IllegalStateException e) { report("抓取任务文件损坏；创建新任务时可先备份原文件。"); }
+        loadSources();
     }
 
     @Override protected void onSaveInstanceState(Bundle outState) {
-        if (pendingResource != null) outState.putString("pendingResource", pendingResource.serialize());
+        if (pendingResource != null && pendingResourceToken == null) persistPendingResource();
+        if (pendingResourceToken != null) outState.putString("pendingResourceToken", pendingResourceToken);
         if (pendingCapture != null) outState.putString("pendingCapture", pendingCapture.serialize());
         super.onSaveInstanceState(outState);
     }
@@ -140,12 +148,10 @@ public final class MainActivity extends Activity {
         for (Button button : buttons) row.addView(button, new LinearLayout.LayoutParams(0, -2, 1));
     }
     private void report(String message) {
-        Integer owner = workerGeneration.get();
-        runOnUiThread(() -> { if (owner == null || generation.get() == owner) status.setText(message); });
+        runOnUiThread(tasks.currentCallback(() -> status.setText(message)));
     }
     private void onCurrentUi(Runnable action) {
-        Integer owner = workerGeneration.get();
-        runOnUiThread(() -> { if (owner == null || generation.get() == owner) action.run(); });
+        runOnUiThread(tasks.currentCallback(action));
     }
     private RunContext newRun() {
         ConcurrentLinkedQueue<Diagnostic> diagnostics = new ConcurrentLinkedQueue<>();
@@ -154,10 +160,7 @@ public final class MainActivity extends Activity {
     }
     private void runAsync(Runnable work) { runAsync(null, work); }
     private void runAsync(RunContext run, Runnable work) {
-        if (task != null) task.cancel(true);
-        int owner = generation.incrementAndGet();
-        task = io.submit(() -> {
-            workerGeneration.set(owner);
+        tasks.submit(() -> {
             try { work.run(); }
             catch (Exception e) {
                 String message = formatError(e);
@@ -176,35 +179,59 @@ public final class MainActivity extends Activity {
                 });
                 report(message);
             }
-            finally { workerGeneration.remove(); }
         });
     }
 
     @Override protected void onDestroy() {
-        cancelCurrentWork();
-        io.shutdownNow();
+        tasks.close();
         searchWorkers.shutdownNow();
         super.onDestroy();
-    }
-    private String formatError(Exception e) {
-        if (e instanceof SourceFailure failure) return failure.stage + " / " + failure.field + " / "
-                + failure.code + " / " + failure.sourceId + ": " + failure.getMessage();
-        return e.getMessage() == null ? e.toString() : e.getMessage();
     }
     private void cancel() {
         cancelCurrentWork();
         report("已取消；成功章节保留在缓存中");
     }
     private void cancelCurrentWork() {
-        generation.incrementAndGet();
-        if (task != null) task.cancel(true);
+        tasks.cancel();
     }
 
-    private void refreshSources() {
-        available = sources.all();
+    private void loadSources() {
+        runAsync(() -> {
+            List<Source> loaded = sources.all();
+            PendingResourceDownload restored = pendingResourceStore.restore(pendingResourceToken);
+            String restoredToken = restored == null ? null : pendingResourceToken;
+            if (restored == null) restored = PendingResourceDownload.restore(legacyPendingResource);
+            PendingResourceDownload selection = restored;
+            onCurrentUi(() -> {
+                pendingResource = selection; pendingResourceToken = restoredToken; legacyPendingResource = null;
+                refreshSources(loaded);
+            });
+            try {
+                CaptureJobStore.Job saved = jobs.get();
+                if (saved != null) report("有未完成抓取：" + saved.book().hit().name() + "。点击「继续上次」复用已抓章节。");
+            } catch (IllegalStateException damaged) { report("抓取任务文件损坏；创建新任务时可先备份原文件。"); }
+        });
+    }
+    private void refreshSources(List<Source> loaded) {
+        available = List.copyOf(loaded);
+        Map<String, String> namesById = new java.util.LinkedHashMap<>();
+        for (Source source : available) namesById.put(source.id(), source.name());
+        sourceNames = Map.copyOf(namesById);
         List<String> names = new ArrayList<>(); names.add("全部书源");
         for (Source source : available) names.add(source.name());
         sourcePicker.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, names));
+        sourcesLoaded = true;
+        if (deferredDocument != null) {
+            DocumentResult pending = deferredDocument; deferredDocument = null;
+            handleDocumentResult(pending.request(), pending.result(), pending.data());
+        } else if (getIntent().hasExtra("rssSearch")) {
+            String query = getIntent().getStringExtra("rssSearch"); getIntent().removeExtra("rssSearch");
+            input.setText(query);
+            String sourceId = getIntent().getStringExtra("rssSearchSource");
+            if (sourceId != null) for (int index = 0; index < available.size(); index++)
+                if (available.get(index).id().equals(sourceId)) sourcePicker.setSelection(index + 1);
+            search(1);
+        }
     }
     private Source selectedSource() { int index = sourcePicker.getSelectedItemPosition(); return index > 0 && index <= available.size() ? available.get(index - 1) : null; }
     private void importClipboard() {
@@ -218,9 +245,9 @@ public final class MainActivity extends Activity {
         if (!url.startsWith("https://") && !url.startsWith("http://")) { report("请输入书源 JSON URL"); return; }
         runAsync(() -> {
             try {
-                SourceStore.UrlImport found = sources.importUrlOrPreview(url, transport);
+                SourceImportCoordinator.Result found = imports.importUrlOrPreview(url, transport);
                 if (found.directory() != null) onCurrentUi(() -> chooseCollections(found.directory()));
-                else showImport(found.imported());
+                else showMixedImport(found);
             }
             catch (Exception e) { report("导入失败：" + e.getMessage()); }
         });
@@ -235,7 +262,7 @@ public final class MainActivity extends Activity {
                     for (int i = 0; i < checked.length; i++) if (checked[i]) chosen.add(labels[i]);
                     if (chosen.isEmpty()) { report("请至少选择一个合集"); return; }
                     runAsync(() -> {
-                        try { showImport(sources.importDirectorySelection(preview, chosen, transport)); }
+                        try { showMixedImport(imports.importDirectorySelection(preview, chosen, transport)); }
                         catch (Exception e) { report("合集导入失败：" + e.getMessage()); }
                     });
                 }).setNegativeButton("取消", null).show();
@@ -243,9 +270,8 @@ public final class MainActivity extends Activity {
     private void updateSubscriptions() {
         runAsync(() -> {
             try {
-                ImportResult updated = sources.updateSubscriptions(transport);
-                showImport(updated);
-                report("已更新 " + sources.subscriptions().size() + " 个订阅；现有 " + updated.sources().size() + " 个书源。");
+                SourceImportCoordinator.Result updated = imports.updateSubscriptions(transport);
+                showMixedImport(updated);
             } catch (Exception e) { report("订阅更新失败：" + e.getMessage()); }
         });
     }
@@ -256,36 +282,25 @@ public final class MainActivity extends Activity {
     private void importText(String text) { runAsync(() -> importTextBlocking(text)); }
     private void importTextBlocking(String text) {
         try {
-            showImport(sources.importText(text, transport));
+            showMixedImport(imports.importText(text, transport));
         } catch (Exception e) { report("导入失败：" + e.getMessage()); }
+    }
+    private void showMixedImport(SourceImportCoordinator.Result result) {
+        showImport(result.books());
+        report("现有 " + result.books().sources().size() + " 个书源、" + result.rssCount()
+                + " 个 RSS 源；预检提示 " + result.books().diagnostics().size() + " 项。RSS 源请从「RSS 订阅」打开。");
     }
     private void showImport(ImportResult imported) {
         onCurrentUi(() -> {
-            importDiagnostics = imported.diagnostics(); refreshSources();
+            importDiagnostics = imported.diagnostics(); refreshSources(imported.sources());
             reportTitle = "书源预检";
             reportDetails = diagnosticText(importDiagnostics);
         });
         report("现有 " + imported.sources().size() + " 个书源；预检提示 " + imported.diagnostics().size() + " 项。点击此处查看。" + (imported.diagnostics().isEmpty() ? "" : " 首项：" + imported.diagnostics().get(0).message()));
     }
 
-    private static String diagnosticText(Iterable<Diagnostic> diagnostics) {
-        StringBuilder details = new StringBuilder();
-        for (Diagnostic diagnostic : diagnostics)
-            details.append(diagnostic.stage()).append(" / ").append(diagnostic.field()).append(" / ")
-                    .append(diagnostic.code()).append("\n").append(diagnostic.message()).append("\n\n");
-        return details.toString();
-    }
-
     private String traceText(RunContext run) {
-        StringBuilder details = new StringBuilder();
-        if (run == null) return "";
-        for (StageTrace trace : run.traces())
-            details.append(trace.sourceId()).append(" / ").append(trace.stage()).append(" / ")
-                    .append(trace.field()).append("\n").append(trace.method()).append(" ")
-                    .append(trace.requestUrl()).append(" → ").append(trace.responseUrl())
-                    .append("\nHTTP ").append(trace.status()).append(" / ")
-                    .append(trace.responseQuality()).append("\n\n");
-        return details.toString();
+        return RunDiagnostics.traceText(run == null ? null : run.traces());
     }
 
     private void search(int page) {
@@ -363,8 +378,7 @@ public final class MainActivity extends Activity {
         activeBook = null; chapters = List.of();
         List<String> labels = new ArrayList<>();
         for (BookHit hit : hits) {
-            String sourceName = available.stream().filter(source -> source.id().equals(hit.sourceId()))
-                    .map(Source::name).findFirst().orElse(null);
+            String sourceName = sourceNames.get(hit.sourceId());
             labels.add(BookHitLabels.search(hit, sourceName));
         }
         list.setChoiceMode(ListView.CHOICE_MODE_NONE);
@@ -512,7 +526,26 @@ public final class MainActivity extends Activity {
             });
         });
     }
+    private boolean persistPendingResource() {
+        try {
+            String token = pendingResourceStore.save(pendingResource);
+            pendingResourceStore.delete(pendingResourceToken);
+            pendingResourceToken = token;
+            return true;
+        } catch (Exception error) {
+            pendingResourceStore.delete(pendingResourceToken);
+            pendingResourceToken = null;
+            report("无法保存资源选择：" + error.getMessage());
+            return false;
+        }
+    }
+    private void clearPendingResource() {
+        pendingResource = null;
+        pendingResourceStore.delete(pendingResourceToken);
+        pendingResourceToken = null;
+    }
     private void openResourceDocument(boolean zip) {
+        if (!persistPendingResource()) return;
         String extension = ".bin";
         if (!zip && pendingResource != null) {
             String path = Uri.parse(pendingResource.resources().get(0).url()).getPath();
@@ -527,16 +560,23 @@ public final class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (!sourcesLoaded && (requestCode == CREATE_TXT || requestCode == CREATE_EPUB || requestCode == CREATE_RESOURCE)) {
+            deferredDocument = new DocumentResult(requestCode, resultCode, data);
+            return;
+        }
+        handleDocumentResult(requestCode, resultCode, data);
+    }
+    private void handleDocumentResult(int requestCode, int resultCode, Intent data) {
         if (resultCode != RESULT_OK) {
             if (requestCode == CREATE_TXT || requestCode == CREATE_EPUB) {
                 pendingCapture = null;
-            } else if (requestCode == CREATE_RESOURCE) pendingResource = null;
+            } else if (requestCode == CREATE_RESOURCE) clearPendingResource();
             return;
         }
         if (data == null || data.getData() == null) {
             if (requestCode == CREATE_TXT || requestCode == CREATE_EPUB) {
                 pendingCapture = null;
-            } else if (requestCode == CREATE_RESOURCE) pendingResource = null;
+            } else if (requestCode == CREATE_RESOURCE) clearPendingResource();
             report("文件选择未返回有效地址，请重试");
             return;
         }
@@ -545,7 +585,7 @@ public final class MainActivity extends Activity {
         else if (requestCode == CREATE_TXT || requestCode == CREATE_EPUB) captureAndExport(uri, requestCode == CREATE_EPUB);
         else if (requestCode == CREATE_RESOURCE) {
             downloadResources(uri);
-            pendingResource = null;
+            clearPendingResource();
         }
     }
     private String read(Uri uri) throws Exception {
@@ -612,7 +652,7 @@ public final class MainActivity extends Activity {
         runAsync(() -> {
             try (OutputStream output = getContentResolver().openOutputStream(uri, "wt")) {
                 if (output == null) throw new IllegalStateException("无法写入文件");
-                ResourceDownloader downloader = new ResourceDownloader(getCacheDir());
+                ResourceDownloader downloader = new ResourceDownloader(getCacheDir(), scripts.stateStore());
                 if (source.kind() == Kind.IMAGE) downloader.downloadZip(source, resources, output);
                 else downloader.download(source, resources.get(0), output);
                 report("已下载 " + resources.size() + " 个资源");

@@ -1,0 +1,22 @@
+[
+  {
+    "sourceUrl": "http://127.0.0.1:18765/rss-standard.xml",
+    "sourceName": "Synthetic RSS XML",
+    "sortUrl": "Standard::http://127.0.0.1:18765/rss-standard.xml",
+    "type": 0,
+    "ruleNextPage": "PAGE"
+  },
+  {
+    "sourceUrl": "http://127.0.0.1:18765/rss-custom",
+    "sourceName": "Synthetic RSS Rules",
+    "sortUrl": "Custom::/rss-list.html",
+    "searchUrl": "/rss-list.html?q={{key}}&page={{page}}",
+    "type": 0,
+    "ruleArticles": "@CSS:li.item",
+    "ruleTitle": "a@text",
+    "ruleLink": "a@href",
+    "rulePubDate": "time@text",
+    "ruleContent": "main@html",
+    "nextContentUrl": "a.next@href"
+  }
+]

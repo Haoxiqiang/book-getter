@@ -13,13 +13,14 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.regex.Pattern;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import okhttp3.OkHttpClient;
 import org.bookgetter.core.Models.*;
-import org.bookgetter.core.Transport;
 import org.bookgetter.core.WebContentTransport;
 import org.bookgetter.core.ResponseSignals;
 import org.bookgetter.core.ResponseTooLargeException;
@@ -48,7 +49,18 @@ public final class AndroidTransport implements WebContentTransport {
 
     private FetchResponse fetchWebView(FetchRequest request, String sourceRegex, String webJs) throws Exception {
         if (!request.method().equals("GET")) throw new IllegalArgumentException("WebView transport supports GET only");
-        Pattern resourcePattern = sourceRegex == null || sourceRegex.isBlank() ? null : Pattern.compile(sourceRegex);
+        LinearRegex resourcePattern;
+        try { resourcePattern = sourceRegex == null || sourceRegex.isBlank() ? null : new LinearRegex(sourceRegex); }
+        catch (IllegalArgumentException invalid) {
+            throw new SourceFailure(Stage.CONTENT, request.policy() == null ? "" : request.policy().id(), "ruleContent.sourceRegex",
+                    "UNSUPPORTED_LINEAR_REGEX", invalid.getMessage(), invalid);
+        }
+        ThreadPoolExecutor matcher = resourcePattern == null ? null : new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(64), runnable -> {
+                    Thread worker = new Thread(runnable, "web-resource-matcher");
+                    worker.setDaemon(true);
+                    return worker;
+                });
         CountDownLatch done = new CountDownLatch(1);
         AtomicBoolean completed = new AtomicBoolean();
         AtomicReference<FetchResponse> result = new AtomicReference<>();
@@ -64,6 +76,8 @@ public final class AndroidTransport implements WebContentTransport {
                 viewRef.set(view);
                 view.getSettings().setJavaScriptEnabled(true);
                 view.getSettings().setDomStorageEnabled(true);
+                view.getSettings().setAllowFileAccess(false);
+                view.getSettings().setAllowContentAccess(false);
                 cookies.setAcceptThirdPartyCookies(view, true);
                 view.setWebViewClient(new WebViewClient() {
                 @Override public void onPageFinished(WebView webView, String url) {
@@ -113,11 +127,32 @@ public final class AndroidTransport implements WebContentTransport {
                     }
                 }
                 @Override public void onLoadResource(WebView webView, String resourceUrl) {
-                    if (resourcePattern != null && resourcePattern.matcher(resourceUrl).matches()
-                            && completed.compareAndSet(false, true)) {
-                        // Legado's sourceRegex captures the resource URL requested by the page.
-                        result.set(new FetchResponse(webView.getUrl(), resourceUrl, 200, Map.of()));
-                        done.countDown();
+                    if (resourcePattern == null || completed.get()) return;
+                    // WebView state belongs to the UI thread; capture it before handing matching off.
+                    String pageUrl = webView.getUrl();
+                    try {
+                        matcher.execute(() -> {
+                            if (completed.get()) return;
+                            try {
+                                if (resourcePattern.matches(resourceUrl, LinearRegex.DEFAULT_TIMEOUT_MILLIS, completed::get)
+                                        && completed.compareAndSet(false, true)) {
+                                    result.set(new FetchResponse(pageUrl, resourceUrl, 200, Map.of()));
+                                    done.countDown();
+                                }
+                            } catch (IllegalArgumentException failure) {
+                                if (completed.compareAndSet(false, true)) {
+                                    error.set(new SourceFailure(Stage.CONTENT, request.policy() == null ? "" : request.policy().id(), "ruleContent.sourceRegex",
+                                            failure.getMessage(), failure));
+                                    done.countDown();
+                                }
+                            }
+                        });
+                    } catch (RejectedExecutionException overloaded) {
+                        if (completed.compareAndSet(false, true)) {
+                            error.set(new SourceFailure(Stage.CONTENT, request.policy() == null ? "" : request.policy().id(), "ruleContent.sourceRegex",
+                                    "Too many pending resource matches", overloaded));
+                            done.countDown();
+                        }
                     }
                 }
                 });
@@ -128,13 +163,20 @@ public final class AndroidTransport implements WebContentTransport {
             }
         });
         boolean finished;
-        try { finished = done.await(45, TimeUnit.SECONDS); }
+        try {
+            long timeoutMillis = request.timeoutMillis() > 0 ? Math.min(request.timeoutMillis(), 86_400_000L) : 45_000;
+            finished = done.await(timeoutMillis, TimeUnit.MILLISECONDS);
+        }
         finally {
             // Close the gate on the worker before posting cleanup; main-thread creation may still be queued.
             completed.set(true);
+            if (matcher != null) matcher.shutdownNow();
             mainHandler.post(() -> {
                 if (pendingRead.get() != null) mainHandler.removeCallbacks(pendingRead.get());
-                if (viewRef.get() != null) viewRef.get().destroy();
+                if (viewRef.get() != null) {
+                    viewRef.get().stopLoading();
+                    viewRef.get().destroy();
+                }
             });
         }
         if (!finished && resourcePattern != null) throw new WebContentTransport.NoMatchingResourceException();

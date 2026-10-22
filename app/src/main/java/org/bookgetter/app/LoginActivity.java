@@ -11,14 +11,18 @@ public final class LoginActivity extends Activity {
     private WebView webView;
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        String url = getIntent().getStringExtra("url");
+        if (!org.bookgetter.core.ResourceUrls.isHttp(url)) { finish(); return; }
         CookieManager.getInstance().setAcceptCookie(true);
         webView = new WebView(this);
         webView.getSettings().setJavaScriptEnabled(true);
         webView.getSettings().setDomStorageEnabled(true);
+        webView.getSettings().setAllowFileAccess(false);
+        webView.getSettings().setAllowContentAccess(false);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
         webView.setWebViewClient(new WebViewClient());
         setContentView(webView);
-        webView.loadUrl(getIntent().getStringExtra("url"));
+        webView.loadUrl(url);
     }
-    @Override protected void onDestroy() { CookieManager.getInstance().flush(); webView.destroy(); super.onDestroy(); }
+    @Override protected void onDestroy() { CookieManager.getInstance().flush(); if (webView != null) webView.destroy(); super.onDestroy(); }
 }

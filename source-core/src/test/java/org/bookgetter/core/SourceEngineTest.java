@@ -1076,8 +1076,10 @@ final class SourceEngineTest {
                 Map.of(), source));
         assertEquals("undefined", runtime.evaluate(
                 "typeof java.post('https://example.test/form','a=1',{}).getClass", Map.of(), source));
-        assertThrows(RuntimeException.class, () -> runtime.evaluate(
-                "java.post('https://example.test/form','a=1',{},1000)", Map.of(), source));
+        assertEquals(302, runtime.evaluate(
+                "java.post('https://example.test/form','a=1',{},1000).statusCode()", Map.of(), source));
+        assertTrue(requests.get(requests.size() - 1).timeoutMillis() > 0);
+        assertTrue(requests.get(requests.size() - 1).timeoutMillis() <= 1000);
     }
 
     @Test void webViewDelayOptionSurvivesRequestPlanning() {
@@ -1242,8 +1244,9 @@ final class SourceEngineTest {
         assertEquals("HEAD", seen.get().method());
         assertFalse(seen.get().followRedirects());
         assertEquals("one", seen.get().headers().get("X-Probe"));
-        assertThrows(RuntimeException.class, () -> runtime.evaluate(
-                "java.head('https://example.test/check', {}, 1000)", Map.of(), source));
+        assertEquals(302, runtime.evaluate(
+                "java.head('https://example.test/check', {}, 1000).statusCode()", Map.of(), source));
+        assertTrue(seen.get().timeoutMillis() > 0 && seen.get().timeoutMillis() <= 1000);
     }
 
     @Test void javaHeadExposesResponseCookiesWithoutFollowingRedirect() {

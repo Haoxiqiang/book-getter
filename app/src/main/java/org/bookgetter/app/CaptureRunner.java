@@ -7,7 +7,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.bookgetter.core.Models.*;
-import org.bookgetter.core.SourceEngine;
 
 /** Coordinates resumable chapter capture without depending on Activity state. */
 final class CaptureRunner {
@@ -25,28 +24,30 @@ final class CaptureRunner {
                       ContentFetcher fetcher, OutputFactory output, Progress progress) throws Exception {
         List<Chapter> captured = new ArrayList<>();
         Map<String, String> failures = new LinkedHashMap<>();
+        ChapterBoundaries boundaries = new ChapterBoundaries(job.catalog());
+        ChapterStore.Session session = cache.session(source, job.book());
+        jobs.beginProgress(job);
         for (Chapter chapter : job.selected()) {
             requireActive();
             try {
-                String boundary = SourceEngine.nextReadableUrl(job.catalog(), chapter);
-                ChapterContent content = cache.get(source, job.book(), chapter, boundary);
+                String boundary = boundaries.after(chapter);
+                ChapterContent content = session.get(chapter, boundary);
                 if (content == null) {
-                    content = fetcher.fetch(source, job.book(), chapter, boundary);
+                    content = fetcher.fetch(session.source(), session.book(), chapter, boundary);
                     requireActive();
-                    cache.put(source, job.book(), content, boundary);
+                    session.put(content, boundary);
                 }
                 captured.add(chapter);
             } catch (Exception e) {
                 requireActive();
                 failures.put(chapter.url(), chapter.title() + ": " + errorText(e));
             }
-            jobs.update(new CaptureJobStore.Job(job.sourceId(), job.sourceHash(), job.book(), job.catalog(),
-                    job.selected(), job.epub(), captured.size(), failures, job.generation()));
+            jobs.updateProgress(job, captured.size(), chapter.url(), failures.get(chapter.url()));
             progress.update(captured.size() + failures.size(), job.selected().size(), failures.size());
         }
         requireActive();
         if (!captured.isEmpty())
-            CaptureExport.writeFromCache(output.open(), job, captured, source, cache, failures.isEmpty(), jobs);
+            CaptureExport.writeFromCache(output.open(), job, captured, session, failures.isEmpty(), jobs);
         return new Result(captured.size(), failures);
     }
 

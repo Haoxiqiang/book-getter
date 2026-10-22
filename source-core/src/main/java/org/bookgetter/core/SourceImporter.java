@@ -17,7 +17,7 @@ public final class SourceImporter {
     private static final Set<String> PROVIDED_HOST = Set.of("ajax", "put", "md5Encode", "base64Encode", "timeFormatUTC", "t2s");
     private static final Set<String> PARTIAL_HOST = Set.of("get", "post", "head", "getString", "getStringList", "getElement",
             "getElements", "setContent", "toast", "longToast", "startBrowserAwait",
-            "base64Decode", "encodeURI", "log");
+            "base64Decode", "encodeURI", "log", "getCookie");
     private SourceImporter() {}
 
     public static ImportResult parse(String text) {
@@ -63,7 +63,7 @@ public final class SourceImporter {
                     continue;
                 }
                 int kindValue;
-                try { kindValue = json.has("bookSourceType") ? json.get("bookSourceType").getAsInt() : 0; }
+                try { kindValue = SourceFields.integer(json, "bookSourceType", 0); }
                 catch (Exception e) { kindValue = -1; }
                 if (kindValue < 0 || kindValue >= Kind.values().length) {
                     diagnostics.add(new Diagnostic(Stage.IMPORT, "INVALID_SOURCE_TYPE",
@@ -91,7 +91,6 @@ public final class SourceImporter {
         for (String field : List.of("exploreScreen", "ruleReview", "loginCheckJs", "coverDecodeJs")) {
             if (source.json().has(field)) result.add(new Diagnostic(Stage.IMPORT, "DEFERRED_CAPABILITY", field + " is not executed", field));
         }
-        if (source.json().has("concurrentRate")) result.add(new Diagnostic(Stage.IMPORT, "DEFERRED_CAPABILITY", "Per-source concurrentRate is not enforced", "concurrentRate"));
         JsonObject content = source.rules("ruleContent");
         if (content != null) for (String field : List.of("payAction", "contentBatch", "imageDecode", "callBackJs")) {
             if (content.has(field)) result.add(new Diagnostic(Stage.IMPORT, "DEFERRED_CAPABILITY", "ruleContent." + field + " is not executed", "ruleContent." + field));
@@ -139,6 +138,6 @@ public final class SourceImporter {
     }
 
     private static String string(JsonObject json, String key) {
-        return json.has(key) && !json.get(key).isJsonNull() ? json.get(key).getAsString() : null;
+        return SourceFields.text(json, key);
     }
 }

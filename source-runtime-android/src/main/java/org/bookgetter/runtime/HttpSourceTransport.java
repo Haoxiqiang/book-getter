@@ -7,6 +7,7 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import okhttp3.HttpUrl;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -28,7 +29,11 @@ final class HttpSourceTransport {
         this.client = client.newBuilder().followRedirects(false).followSslRedirects(false).build();
     }
 
-    FetchResponse fetch(FetchRequest input) throws IOException {
+    FetchResponse fetch(FetchRequest input) throws IOException { return fetch(input, null); }
+
+    FetchResponse fetch(FetchRequest input, java.util.concurrent.atomic.AtomicReference<okhttp3.Call> activeCall) throws IOException {
+        long deadline = input.timeoutMillis() > 0
+                ? System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(Math.min(input.timeoutMillis(), 86_400_000L)) : 0;
         String target = input.url();
         String method = input.method();
         String body = input.body();
@@ -48,7 +53,17 @@ final class HttpSourceTransport {
                     ? RequestBody.create(MediaType.parse(contentType), new byte[0]) : null)
                     : RequestBody.create(MediaType.parse(contentType), body);
             request.method(method, requestBody);
-            try (Response response = client.newCall(request.build()).execute()) {
+            okhttp3.Call call = client.newCall(request.build());
+            if (deadline != 0) {
+                long remaining = deadline - System.nanoTime();
+                if (remaining <= 0) throw new java.net.SocketTimeoutException("Request timeout");
+                call.timeout().timeout(remaining, TimeUnit.NANOSECONDS);
+            }
+            if (activeCall != null) {
+                activeCall.set(call);
+                if (Thread.currentThread().isInterrupted()) { call.cancel(); throw new IOException("Request cancelled"); }
+            }
+            try (CallInterruptMonitor cancellation = new CallInterruptMonitor(call); Response response = call.execute()) {
                 if (input.followRedirects() && response.isRedirect()) {
                     String location = response.header("Location");
                     HttpUrl next = location == null ? null : response.request().url().resolve(location);
@@ -78,6 +93,8 @@ final class HttpSourceTransport {
                             ? String.join("\n", response.headers().values(name)) : response.header(name));
                 }
                 return new FetchResponse(response.request().url().toString(), text, response.code(), responseHeaders);
+            } finally {
+                if (activeCall != null) activeCall.compareAndSet(call, null);
             }
         }
         throw new IOException("Too many redirects at " + ResponseSignals.urlForLog(target));

@@ -18,44 +18,76 @@ final class ChapterStore {
     private final Gson gson = new Gson();
     ChapterStore(Context context) { this(new File(context.getFilesDir(), "chapter-cache")); }
     ChapterStore(File directory) { this.directory = directory; directory.mkdirs(); }
+    /** A capture owns this snapshot; no cached identity is retained across sessions. */
+    final class Session {
+        private final Source source;
+        private final BookDetail book;
+        private final String sourceIdentity;
+        private final String bookJson;
+
+        private Session(Source source, BookDetail book) {
+            if (source == null || book == null || book.hit() == null || book.hit().url() == null)
+                throw new IllegalArgumentException("Source and book context are required");
+            this.source = new Source(source.id(), source.name(), source.kind(), source.json().deepCopy());
+            this.book = new BookDetail(book.hit(), book.tocUrl(), book.downloadUrls() == null ? null
+                    : java.util.Collections.unmodifiableList(new java.util.ArrayList<>(book.downloadUrls())));
+            sourceIdentity = sourceHash(this.source);
+            bookJson = gson.toJson(this.book);
+        }
+
+        Source source() { return source; }
+        BookDetail book() { return book; }
+
+        ChapterContent get(Chapter chapter, String nextChapterUrl) {
+            if (!belongsToBook(chapter)) return null;
+            File file = file(sourceIdentity, bookJson, chapter, nextChapterUrl);
+            if (!file.isFile()) return null;
+            try (InputStreamReader reader = new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8)) {
+                ChapterContent content = gson.fromJson(reader, ChapterContent.class);
+                // A syntactically valid but incomplete cache entry must be fetched again.
+                return valid(source, chapter, content) ? content : null;
+            } catch (Exception ignored) { return null; }
+        }
+
+        void put(ChapterContent content, String nextChapterUrl) throws Exception {
+            if (content == null || !belongsToBook(content.chapter()) || !valid(source, content.chapter(), content))
+                throw new IllegalArgumentException("Invalid chapter cache entry");
+            File file = file(sourceIdentity, bookJson, content.chapter(), nextChapterUrl);
+            File temp = File.createTempFile(file.getName(), ".tmp", directory);
+            try {
+                try (OutputStreamWriter writer = new OutputStreamWriter(new FileOutputStream(temp), StandardCharsets.UTF_8)) {
+                    gson.toJson(content, writer);
+                }
+                if (!temp.renameTo(file)) throw new IllegalStateException("Cannot save chapter cache");
+            } finally { if (temp.exists()) temp.delete(); }
+        }
+
+        private boolean belongsToBook(Chapter chapter) {
+            return chapter != null && book.hit().url().equals(chapter.bookUrl());
+        }
+    }
+
+    Session session(Source source, BookDetail book) { return new Session(source, book); }
+
     ChapterContent get(Source source, BookDetail book, Chapter chapter, String nextChapterUrl) {
         if (book == null || book.hit() == null || book.hit().url() == null || chapter == null
                 || !book.hit().url().equals(chapter.bookUrl())) return null;
-        File file = file(source, book, chapter, nextChapterUrl);
-        if (!file.isFile()) return null;
-        try (InputStreamReader reader = new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8)) {
-            ChapterContent content = gson.fromJson(reader, ChapterContent.class);
-            // A syntactically valid but incomplete cache entry must be fetched again.
-            return valid(source, chapter, content) ? content : null;
-        }
-        catch (Exception ignored) { return null; }
+        return session(source, book).get(chapter, nextChapterUrl);
     }
     void put(Source source, BookDetail book, ChapterContent content, String nextChapterUrl) throws Exception {
-        if (book == null || book.hit() == null || book.hit().url() == null
-                || content == null || content.chapter() == null
-                || !book.hit().url().equals(content.chapter().bookUrl())
-                || !valid(source, content.chapter(), content))
+        if (book == null || book.hit() == null || book.hit().url() == null)
             throw new IllegalArgumentException("Invalid chapter cache entry");
-        File file = file(source, book, content.chapter(), nextChapterUrl);
-        File temp = File.createTempFile(file.getName(), ".tmp", directory);
-        try {
-            try (OutputStreamWriter writer = new OutputStreamWriter(new FileOutputStream(temp), StandardCharsets.UTF_8)) {
-                gson.toJson(content, writer);
-            }
-            if (!temp.renameTo(file)) throw new IllegalStateException("Cannot save chapter cache");
-        } finally {
-            if (temp.exists()) temp.delete();
-        }
+        session(source, book).put(content, nextChapterUrl);
     }
     static String sourceHash(Source source) {
         return hex(digest(source.json().toString()));
     }
 
-    private File file(Source source, BookDetail book, Chapter chapter, String nextChapterUrl) {
+    private File file(String sourceIdentity, String bookJson, Chapter chapter, String nextChapterUrl) {
         try {
             // Rules can read book metadata/variables, and the next chapter ends pagination.
-            String key = sourceHash(source) + "\n" + gson.toJson(chapter)
-                    + "\n" + (nextChapterUrl == null ? "" : nextChapterUrl) + "\n" + gson.toJson(book);
+            String key = sourceIdentity + "\n" + gson.toJson(chapter)
+                    + "\n" + (nextChapterUrl == null ? "" : nextChapterUrl) + "\n" + bookJson;
             return new File(directory, hex(digest(key)) + ".json");
         } catch (Exception e) { throw new IllegalStateException(e); }
     }
@@ -75,7 +107,8 @@ final class ChapterStore {
     }
     private static String hex(byte[] bytes) {
         StringBuilder key = new StringBuilder();
-        for (byte value : bytes) key.append(String.format("%02x", value & 255));
+        for (byte value : bytes)
+            key.append(Character.forDigit((value >>> 4) & 15, 16)).append(Character.forDigit(value & 15, 16));
         return key.toString();
     }
 }
