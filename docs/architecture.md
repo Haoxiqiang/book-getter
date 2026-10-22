@@ -1,25 +1,26 @@
 # 架构与处理机制
 
-## 原工程调用链
+## 模块边界
 
-原仓库的 `BookSource` 包含地址、请求头、搜索/详情/目录/正文规则与 `mainJs`。`WebBook.searchBookAwait` 用 `AnalyzeUrl` 构造并发送请求，`BookList` 通过 `AnalyzeRule` 生成搜索结果。后续 `WebBook.getBookInfoAwait`、`getChapterListAwait`、`getContentAwait` 分别转给 `BookInfo`、`BookChapterList`、`BookContent`。`mainJs` 则改走 `JsSourceBook`/`JsSourceEngine`。原对象同时调用 Room、`BookHelp` 缓存、全局配置及阅读器状态，不能直接当独立库使用。
+运行时依赖固定为 `app → source-runtime-android → source-core`，`source-catalog` 是独立开发工具。原 `export` 模块已合并入核心并保留包名。核心中的 `org.bookgetter.business` 承载原 App 的订阅事务、导入协调、缓存、任务日志、续抓与导出协调；不依赖 Android。
 
-定位入口：`app/src/main/java/io/legado/app/data/entities/BookSource.kt`、`model/webBook/WebBook.kt`、`model/analyzeRule/{AnalyzeUrl,AnalyzeRule}.kt`、`model/jsSource/JsSourceBook.kt`。原工程导入分支位于 `ui/association/BookSourceImport.kt`，导出位于 `service/ExportBookService.kt`。
+Android 库通过 `AndroidSourceStorage` 实现偏好存储，默认网络、Cookie、网页与下载实现也留在此层。App 显式提供目录与适配器，仅负责 UI、系统交互和生命周期。第三方版本统一在 Gradle version catalog；宿主接入和线程/资源所有权见[嵌入指南](embedding.md)。
 
-## 新工程分层
+## 数据流与职责
 
-```
-App (导入、选择、任务与导出 UI)
-  ├─ SourceImporter → Source / Diagnostic
-  ├─ SearchCoordinator → SourceEngine
-  │                     ├─ RequestPlanner → Transport (HTTP 或 WebView)
-  │                     ├─ WebContentTransport (正文网页脚本与资源监听)
-  │                     ├─ RuleEvaluator (CSS/XPath/JSONPath/正则)
-  │                     └─ ScriptRuntime (Rhino 基础宿主 API)
-  ├─ ChapterStore (按书源快照、书籍上下文和下一章边界隔离的逐章缓存)
-  ├─ CaptureJobStore (选章任务与进度)
-  ├─ CaptureRunner (抓取、续跑、进度写入与缓存导出)
-  └─ BookExporter (TXT/EPUB)
+```text
+app：Activity、文件选择器、生命周期及调试探针
+  └─ source-runtime-android：默认平台适配（api 暴露核心）
+       ├─ AndroidTransport → HTTP / WebView / CookieManager
+       ├─ AndroidSourceStorage → SharedPreferences
+       ├─ ResourceDownloader → ResourceDownloadService
+       ├─ RssWebViewController → RssBrowserSession
+       └─ source-core：纯 Java
+            ├─ core：导入模型、请求规划、规则与普通/RSS 引擎
+            ├─ business：订阅事务、缓存、任务日志、续抓与导出协调
+            └─ export：BookExporter（TXT/EPUB）
+
+source-catalog：独立开发工具，不进入运行时依赖
 ```
 
 `SourceEngine` 不依赖 Activity、Room、文件系统或 Android 类；其输入与输出是 Java 数据类型。阶段请求经 `StageFetcher` 统一分类、追踪，再由 `Transport` 决定 HTTP 或浏览器获取方式；Android 实现使用同一个 CookieManager。`CaptureRunner` 不持有 Activity 状态，文件流由界面在用户选定位置后提供。
@@ -44,7 +45,7 @@ App (导入、选择、任务与导出 UI)
 
 媒体类型通过 `ChapterContent.kind/resources` 表示，Android 运行层提供显式触发的二进制下载，漫画图片可打包为 ZIP。`WebContentTransport` 负责 `sourceRegex` 的页面资源监听；HTTP-only 运行时明确报不支持。分段流与解密仍需单独实现。复杂 JS 宿主方法应逐项实现并在能力矩阵增加回归样本。规则表达式扩展仍位于 `RuleEvaluator`，不应在 UI 或导出层增加网站特例。
 
-## 2026-10-22 UI 与抓取存储整理
+## 任务日志与 UI 生命周期
 
 `ActivityTasks` 统一持有后台任务、取消代数和过期 UI 回调检查，销毁后不再分发结果；`RunDiagnostics` 负责阶段诊断文本，界面只选择展示目标。首次书源读取在后台完成，导入完成直接复用返回的书源快照，搜索结果按预先建立的来源名称索引展示，避免在主线程重新解析整份规则。
 
@@ -52,10 +53,16 @@ App (导入、选择、任务与导出 UI)
 
 系统文件选择器的资源 URL 列表存放在应用私有 `pending-resources` 目录，Activity 状态仅保存随机 token；选定或取消后的快照删除，未能正常返回的孤立快照七天后清理。旧版 Bundle 中的完整选择仍可迁移读取。EPUB 导出确定关闭 ZIP 压缩器，但保留调用方对最终输出流的关闭和提交责任。目录工具的配置检查与实际下载共享同一 URI 协议校验。
 
-## 2026-10-22 规则状态、请求与 RSS
+## 规则状态与 RSS 会话
 
 `RuleSyntax` 共享词法边界，`RuleBindings` 管理工作线程上的搜索项、书籍、章节和 RSS 文章作用域；`RhinoSourceBindings` 只安装源状态及 Cookie 的受控 facade。`SourcePolicy` 保留模型身份、限速和默认头来源；`SourceRequests` 对阶段、JS 子请求、资源下载及 RSS 原生 GET 应用统一策略，头优先级为默认源头、已保存登录头、显式请求头。登录头仅隐式发送到相同 origin，源 ID 的说明片段不参与 origin 判断。私有状态不进入书源 JSON，应用禁用备份。
 
 RSS 模型、导入器、引擎与仓储独立；`MixedSourceStore` 以一次持久提交发布两种模型。`RssActivity` 使用不可变阅读目标，资源与文章选择通过私有 token 恢复。预加载只预取最多两篇文章的引擎结果，不运行隐藏页面 UI 动作；缓存有总量限制，并用源快照、完整文章、结构化状态、源/文章 Cookie 和刷新版本隔离，拒绝跨会话的迟到响应。
 
 `RssWebViewController` 管理 origin、主 frame、页面 token、注入、导航与有界队列。旧 provider 不支持安全消息时不安装原生桥。浏览器 URL 正则使用有编译/匹配预算的 RE2/J 子集；普通规则正则继续保留 Java 语义。Android ICU 不支持基于 CharSequence 的合作中断，所以不能把 JVM 正则包装当作 Android 时间上限。
+
+## 官方 Legado 调用链参考
+
+原仓库的 `BookSource` 包含地址、请求头、搜索/详情/目录/正文规则与 `mainJs`。`WebBook.searchBookAwait` 用 `AnalyzeUrl` 构造并发送请求，`BookList` 通过 `AnalyzeRule` 生成搜索结果。后续 `WebBook.getBookInfoAwait`、`getChapterListAwait`、`getContentAwait` 分别转给 `BookInfo`、`BookChapterList`、`BookContent`。`mainJs` 则改走 `JsSourceBook`/`JsSourceEngine`。原对象同时调用 Room、`BookHelp` 缓存、全局配置及阅读器状态，不能直接当独立库使用。
+
+定位入口：`app/src/main/java/io/legado/app/data/entities/BookSource.kt`、`model/webBook/WebBook.kt`、`model/analyzeRule/{AnalyzeUrl,AnalyzeRule}.kt`、`model/jsSource/JsSourceBook.kt`。原工程导入分支位于 `ui/association/BookSourceImport.kt`，导出位于 `service/ExportBookService.kt`。

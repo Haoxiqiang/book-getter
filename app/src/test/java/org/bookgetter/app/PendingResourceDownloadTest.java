@@ -1,5 +1,7 @@
 package org.bookgetter.app;
 
+import org.bookgetter.business.ChapterStore;
+
 import static org.junit.Assert.*;
 import java.util.List;
 import org.bookgetter.core.Models.Resource;

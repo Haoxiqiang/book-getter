@@ -1,5 +1,14 @@
 package org.bookgetter.app;
 
+import org.bookgetter.runtime.AndroidSourceStorage;
+import org.bookgetter.business.MixedSourceStore;
+
+import org.bookgetter.business.SourceStore;
+import org.bookgetter.business.SourceImportCoordinator;
+import org.bookgetter.business.ChapterStore;
+import org.bookgetter.business.CaptureJobStore;
+import org.bookgetter.business.CaptureRunner;
+
 import static org.bookgetter.app.RunDiagnostics.diagnosticText;
 import static org.bookgetter.app.RunDiagnostics.formatError;
 
@@ -80,7 +89,11 @@ public final class MainActivity extends Activity {
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
-        sources = new SourceStore(this); imports = new SourceImportCoordinator(this); cache = new ChapterStore(this); jobs = new CaptureJobStore(this);
+        MixedSourceStore sourceStorage = new MixedSourceStore(AndroidSourceStorage.mixedStorage(this));
+        sources = new SourceStore(sourceStorage.bookStorage());
+        imports = new SourceImportCoordinator(sourceStorage);
+        cache = new ChapterStore(new java.io.File(getFilesDir(), "chapter-cache"));
+        jobs = new CaptureJobStore(getFilesDir());
         pendingResourceStore = new PendingResourceStore(getFilesDir());
         transport = new AndroidTransport(this);
         scripts = new RhinoRuntime(transport, this::report, ignored -> {},
@@ -652,7 +665,7 @@ public final class MainActivity extends Activity {
         runAsync(() -> {
             try (OutputStream output = getContentResolver().openOutputStream(uri, "wt")) {
                 if (output == null) throw new IllegalStateException("无法写入文件");
-                ResourceDownloader downloader = new ResourceDownloader(getCacheDir(), scripts.stateStore());
+                org.bookgetter.core.ResourceDownloadService downloader = new ResourceDownloader(getCacheDir(), scripts.stateStore());
                 if (source.kind() == Kind.IMAGE) downloader.downloadZip(source, resources, output);
                 else downloader.download(source, resources.get(0), output);
                 report("已下载 " + resources.size() + " 个资源");

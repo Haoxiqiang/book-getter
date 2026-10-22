@@ -1,7 +1,9 @@
 # Book Getter agent guidance
 
-For book-source or RSS rule parsing, request planning, Java compatibility work, and differential tests, read [the compatibility skill](skills/legado-source-compat/SKILL.md) and its relevant references. For creating, repairing, or explaining an importable Legado book source or RSS subscription source, read [the authoring skill](skills/legado-source-authoring/SKILL.md) instead; use both when a task spans authoring and engine behavior.
+For creating, repairing, or explaining Legado book/RSS sources, or for rule parsing, request planning, JS hosts and compatibility tests, read [the unified Legado skill](skills/legado-source/SKILL.md). Select its authoring or engine-development references for the actual task; use both only when the task spans both workflows.
 
-The official Legado source checkout is located at `../legado` (relative to this project root). Treat it as an important reference for implementation and compatibility work, and prefer its source code for behavior disputes.
+Start project documentation at [docs/README.md](docs/README.md). Use [architecture](docs/architecture.md) and [embedding](docs/embedding.md) for module and host boundaries, [rule contract](docs/legado-rule-contract.md) for semantics, [capability matrix](docs/compatibility.md) for current support, and [verification](docs/verification.md) for checks. Dated probes in `docs/history/` are historical evidence, not current site availability.
 
-The upstream `legadoSkill/` directory is an independent Git clone for maintenance; keep its history and license. All new application code should be Java, not Kotlin.
+The official Legado checkout is `../legado` relative to this project root. Prefer its source code for behavior disputes. The upstream `legadoSkill/` directory is an independent Git clone; preserve its history and license and do not fold local guidance into it.
+
+All new application code must be Java, not Kotlin. Runtime dependencies flow `app → source-runtime-android → source-core`; `source-catalog` is a separate development tool. Keep Android and App types out of the Java core. Build with JDK 21; third-party versions live in `gradle/libs.versions.toml`.

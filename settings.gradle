@@ -4,4 +4,4 @@ dependencyResolutionManagement {
     repositories { google(); mavenCentral(); maven { url = 'https://jitpack.io' } }
 }
 rootProject.name = 'new-book-getter'
-include ':app', ':source-core', ':source-runtime-android', ':export', ':source-catalog'
+include ':app', ':source-core', ':source-runtime-android', ':source-catalog'

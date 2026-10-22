@@ -19,5 +19,5 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Install Android SDK
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
-      - name: Test, validate catalog configuration, and build
+      - name: Test core and Android adapters, validate tools, and build debug app
         run: ./gradlew test :source-catalog:checkCatalogConfig :app:lintDebug :app:assembleDebug :app:assembleRelease --stacktrace

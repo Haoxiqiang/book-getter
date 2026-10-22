@@ -1,5 +1,7 @@
 package org.bookgetter.app;
 
+import org.bookgetter.business.CaptureJobStore;
+
 import com.google.gson.Gson;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;

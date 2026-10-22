@@ -1,5 +1,7 @@
 package org.bookgetter.app;
 
+import org.bookgetter.business.CaptureJobStore;
+
 import static org.junit.Assert.*;
 import java.util.List;
 import java.util.Map;

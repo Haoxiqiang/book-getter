@@ -1,73 +1,52 @@
-# Legado 书源规则契约与测试设计
+# Legado 规则契约与回归要求
 
-本文件是 `new-book-getter` 的实现和验收依据，不是另造一套书源格式。权威顺序：兄弟目录 `../legado` 的官方源码 → 可重复的真实 App/源站行为 → [legadoSkill](../legadoSkill/README.md) 的知识库与案例。后者的 Python 调试器是近似实现，其 `SKILL.md` 也明确要求冲突时回查官方源码。上游 skill 仓库当前固定在 `1e59ff3c1fa428a1a0981f42249fd4cf5d347644`，MIT 许可见[许可证](../legadoSkill/LICENSE)。上游案例可能涉及第三方站点与作品；不能把仓库的 MIT 许可推定为所有书源或正文的再分发许可。
+本页集中维护 `new-book-getter` 实现时需要遵守的规则语义；模型与目标能力见[书源定义 RFC](source-definition.md)，当前支持子集见[能力矩阵](compatibility.md)，RSS 专用分支见[RSS 边界](rss-compatibility.md)。这里的要求不表示所有功能已实现。
 
-## 对象和执行阶段
+官方行为以兄弟目录 `../legado` 的源码为准，固定提交与资料版本见 RFC。可重复 Android 差分用于核对平台表现；上游[规则索引](../legadoSkill/docs/rules/README.md)、[勘误](../legadoSkill/docs/rules/errata.md)和 Python 模拟器只作线索。上游 MIT 许可不等于第三方书源或正文的再分发许可。
 
-| 阶段 | 书源字段/输入 | 必须输出或失败分类 | 官方依据 |
-| --- | --- | --- | --- |
-| 导入 | 单对象/数组、`bookSourceUrl`、`bookSourceName`、`bookSourceType` | 按主键去重；保留来源、原文及预检诊断 | [BookSource.kt](../../legado/app/src/main/java/io/legado/app/data/entities/BookSource.kt) |
-| 请求 | `searchUrl`，详情/目录/正文 URL；`header`、URL 选项、登录 Cookie | 最终 URL、方法、头、正文、编码、WebView 要求；请求错误单独归类 | [AnalyzeUrl.kt](../../legado/app/src/main/java/io/legado/app/model/analyzeRule/AnalyzeUrl.kt) |
-| 搜索 | `ruleSearch.bookList` 及书名、地址、作者等字段 | 0 条是有效结果；非空结果须有书名和绝对详情地址 | [SearchRule.kt](../../legado/app/src/main/java/io/legado/app/data/entities/rule/SearchRule.kt) |
-| 详情 | `ruleBookInfo.init`、字段、`tocUrl`、可选 `downloadUrls` | 搜索字段与详情字段合并；可选直链失败不能冒充正文失败 | [BookInfoRule.kt](../../legado/app/src/main/java/io/legado/app/data/entities/rule/BookInfoRule.kt) |
-| 目录 | `ruleToc`、下一页、分卷/VIP/付费标记 | 稳定章节顺序、绝对章节地址、去重和循环检测 | [TocRule.kt](../../legado/app/src/main/java/io/legado/app/data/entities/rule/TocRule.kt) |
-| 正文 | `ruleContent.content`、`nextContentUrl`、`replaceRegex`、媒体类型 | 多页合并、广告净化、资源链接、正文非空；下一页不得越到下一章 | [ContentRule.kt](../../legado/app/src/main/java/io/legado/app/data/entities/rule/ContentRule.kt) |
+## 阶段、身份与结果
 
-类型值依官方 `BookSource`：0 文本、1 音频、2 图片、3 文件、4 视频。阅读排版、TTS、本地 TXT/EPUB 解析与 MOBI 转换不在本工程目标内。书源规则可同时依赖多个阶段的共享变量，不能把每个字段都当作完全独立的纯函数。
+- 普通书源按 `bookSourceUrl` 识别，类型 0 文本、1 音频、2 图片、3 文件、4 视频；RSS 有独立身份和类型。导入包装由入口决定，未知字段可存档，不意味着可执行。
+- 搜索/发现按条目上下文提取字段，详情合并已有书籍信息，目录保持顺序和章节标记，正文可返回文本或媒体资源。源不必覆盖全部阶段；只验用户目标实际调用的路径。
+- 正常零结果须有正确响应与合理零命中证据；HTTP 错误、登录页或宿主不支持不得折算为空列表。错误保留模型、源 ID、阶段、字段和代码。
+- 可选元数据的失败保留告警，不遮蔽有效导航；书名、地址等当前路径必要字段失败可见。搜索项变量随书传递，书籍、章节、文章与源状态按各自作用域保存，不把所有字段视为纯函数。
 
-## 规则语法：优先验证的契约
+官方入口：[BookSource](../../legado/app/src/main/java/io/legado/app/data/entities/BookSource.kt)、[WebBook](../../legado/app/src/main/java/io/legado/app/model/webBook/WebBook.kt)、[BookList](../../legado/app/src/main/java/io/legado/app/model/webBook/BookList.kt)、[BookInfo](../../legado/app/src/main/java/io/legado/app/model/webBook/BookInfo.kt)。
 
-1. 默认规则、显式 `@CSS:`、`@XPath:`、`@Json:`、URL/规则中的 `<js>...</js>`、`@js:`、`jsLib` 与 `mainJs` 走不同模式。解析器应先识别模式，再解析选择器、动作和后置替换；不可把 `@js:` 或 `{{...}}` 误送进 CSS 选择器。依据：[AnalyzeRule.kt](../../legado/app/src/main/java/io/legado/app/model/analyzeRule/AnalyzeRule.kt)、[AnalyzeUrl.kt](../../legado/app/src/main/java/io/legado/app/model/analyzeRule/AnalyzeUrl.kt)。
-2. `{{表达式}}` 在请求 URL 中执行 JS 后插入结果；整数浮点值如 `1.0` 输出为 `1`。规则中的 `{{...}}` 可能是内层规则（`$.foo` 等），也可能是 JS 表达式，不能一概文本替换。URL 选项还包括 `method`、`body`、`charset`、`headers`、`webView` 等，应保留原始请求证据以便诊断。依据：`AnalyzeUrl.replaceKeyPageJs` 和 `AnalyzeRule.SourceRule.makeUpRule`。
-3. `||` 是依次回退到第一个非空结果；`&&` 合并多路结果；`%%` 按位置交错。JSONPath 本身也允许逻辑运算，拆分时须由规则分析器判别而非无条件 `String.split`。依据：[AnalyzeByJSoup.kt](../../legado/app/src/main/java/io/legado/app/model/analyzeRule/AnalyzeByJSoup.kt)、[AnalyzeByJSonPath.kt](../../legado/app/src/main/java/io/legado/app/model/analyzeRule/AnalyzeByJSonPath.kt)。
-4. `##正则##替换` 对全文替换；末尾再加一个 `#`（`###`）表示先取首个匹配，再在该片段内替换，未命中为空。目录/正文下一页提取经常依赖这一点。依据：`AnalyzeRule.replaceRegex`。
-5. HTML 的 `@text`、`@ownText`、`@html`、`@href/@src`、`@textNodes`、`@all`、位置索引、属性和节点组合应区分“返回节点列表”和“返回字段字符串”；列表字段可以直接使用动作。`@textNodes` 取直属文本；`@all` 取原外层 HTML；`@html` 去掉所选节点中的 script/style 后取外层 HTML。[ESJ 的 `@all`](dom-actions-probe.md)与[抖音小说的 `@html`](html-action-probe.md)各有一章 Android/JVM 正对照，但不等于全文净化通过。尤其 `tag.a.0`、`tag.span.-1`、`tag.tr!0` 是 Legado 位置索引/排除语法而非 CSS 类名；[跨站广度探针](diverse-source-search-probe.md)曾因此把真实搜索误判为 0。`tag.span[0:1]` 等方括号索引已按[真实规则样本](bracket-index-and-metadata.md)补离线回归，但样本站点仍被网络阻断。XPath 不带前缀的 `//a` 应匹配 HTML 元素；JSONPath 缺省字段不应让整本搜索失败。具体 CSS 能力应以官方 `AnalyzeByJSoup` 和所用 jsoup 版本测试为准，不把 skill 里的“禁用某些伪类”口号当作全部模式的硬性语法限制。
-6. JS 宿主是受控兼容层：`java.ajax/get/put`、Cookie、源/书/章节变量、转换/编码/时间函数、`source`、`book`、`chapter` 等必须有生命周期和上下文。不能把任意 Java 类暴露给书源脚本；未知方法应给出字段、阶段、方法名诊断。当前 `source-core` 只实现其中一部分；`java.getElement/getElements` 已有[HTML 安全节点视图与跨端合成夹具](dom-host-getelement-probe.md)，`java.getString/setContent` 仍是受控基础子集，`java.t2s` 已接入与基准版本相同的转换库和词组例外字典，其他宿主能力仍不能宣称完全兼容。[宜搜样本](header-and-search-item-variable-probe.md)已验证每个搜索项的 `@put` 变量快照随书进入目录，以及 JS 引号中的模板先展开；不等于变量持久化/并发宿主全部等价。官方接口参见 [JsExtensions.kt](../../legado/app/src/main/java/io/legado/app/help/JsExtensions.kt) 和 `AnalyzeRule.put/get`。
-7. XPath 作为列表规则须保留元素节点，以便后续 `text/href` 等字段继续取值；`//...[@class=...]` 内的 `@` 不代表 CSS 动作。`href<js>…</js>` 是字段结果再执行脚本。搜索的非关键元数据字段解析失败不能吞掉已有书名/地址，但须留下诊断。[黑岩 XPath/可选字段探针](xpath-and-optional-fields-probe.md)在 JVM 与 Android 均验证到目录，VIP 标记数量与公开页面同数；手机小说的规则/页面结构漂移则用指定详情页直接定位。正文、VIP 可访问性和混合模式并未据此通过。
-8. 详情页的分类、字数、最新章、简介、封面也是可选字段；异常不能遮蔽有效目录地址，且应留下字段告警。书名、作者、目录地址仍是失败可见字段。官方依据为 `BookInfo.kt` 的逐字段 `try/catch`；[速读谷四页目录探针](sudugu-paged-catalog-probe.md)提供真实站点与 Android/JVM 对照，但显式跳过了搜索、未抓正文。
-9. JS 规则接在 DOM 列表之后时，`result` 必须保留节点语义，不能一律降成外层 HTML 字符串。受控宿主只暴露已验证的方法，不开放真实 Java 类；[rezero 卷规则探针](dom-node-js-probe.md)以 `result.attr('href')` 在 Android/JVM 均核对 23 个卷标题和 887 个普通章节。节点 `select/hasClass` 已由经致文学目录正对照，其他列表对象和混合链仍需另测。
-10. 书源 ID 可以在 URL 的 `#` 片段中附加中文或带空格的区别标签，仍可作为相对搜索路径的基础；按官方 `NetworkUtils.getAbsoluteURL` 的 URL 解析语义验证，不能让严格 URI 校验把请求留下为无协议路径。搜索和目录列表规则的开头 `+` 是入口控制前缀、`-` 表示倒序，须在解析规则前处理；SF 轻小说的 `+@js:` 目录与[两类前缀回归及跨站记录](source-id-fragment-and-list-prefix-probe.md)是正对照，其他列表模式仍需分别验证。
-11. 对脚本中的 `importClass(org.jsoup.Jsoup)` 只按已观察到的 `Jsoup.parse(String)` 和安全 DOM 视图实现白名单；不能为追求兼容开放任意 Java 包或反射。SF 轻小说的[真实搜索字段与 Android/JVM 对照](jsoup-safe-facade-probe.md)验证了分类和最新章恢复，但完整 JavaImporter 与其他 Jsoup 方法仍未实现。
+## 模式、选择器与替换
 
-补充的[混合 JS/JSONPath 探针](mixed-js-jsonpath-probe.md)纠正了先前对 `{$.字段}` 的误读：官方 `AnalyzeByJSonPath.getString` 支持内嵌取值，`AnalyzeRule.splitSourceRule` 允许 `<js>...</js>` 后继续 JSONPath。JSON Map 上的 `href/text` 动作若不存在，必须返回空以允许 `||` 回退，不能把整张 Map 字符串化为有效 URL；但 JS 显式 `String(result)` 又可能依赖官方 Map 的字符串视图。两者要区分，且不开放 Java 反射。含 `,{URL选项}` 的相对章节链接只解析路径部分，保留选项供请求规划使用。
+- 先按输入和规则段识别 Default、`@CSS:`、`@XPath:`、`@Json:`、`@js:`、`<js>…</js>`，再解析动作、组合与后置替换。模式前缀大小写不敏感，JSON 属性与选择器内容保持原样。`getElements`、`getStringList`、`getString` 的返回形态不同。
+- Default 的 `class.name`、`tag.name`、`text.片段`、零基/负索引、排除及含两端的区间不能误当纯 CSS。CSS 伪类按实际模式和 Jsoup 版本验证，不全局禁用或放行。列表开头 `+` 控制入口、`-` 倒序，需先处理。
+- `@textNodes` 取直属文本；`@html` 去 script/style 后返回外层 HTML，`@all` 保留原外层 HTML。DOM 列表进入 JS 后仍保留节点语义；XPath 列表保留节点，过滤器里的 `@` 不是动作分隔符。
+- `||` 取首个非空分支，`&&` 合并，`%%` 交错；JSONPath 过滤器内的同形运算符不能机械拆开。JSONPath 可内嵌 `{$.字段}`，`<js>` 后仍可继续 JSONPath。Map 上不存在的 `href/text` 动作返回空以允许回退，不把整张 Map 当 URL；显式 `String(result)` 的视图另行验证。
+- `##匹配##替换` 做常规替换；第四段（常见 `###`）从首个匹配片段求替换结果，未匹配为空。列表后置替换逐项执行并保留项内换行；不能解释成“只替换第一处并保留全文”。正文 `replaceRegex` 属合并后的独立层。
+- `href<js>…</js>` 是字段结果后置脚本。规则内 `{{…}}` 可能是嵌套规则或 JS，不一概文本替换。URL 字段使用 URL 模式，多匹配链接只取首个，不拼成一个地址。
 
-[夜伴书屋探针](url-first-and-pagination-probe.md)进一步确认官方 `AnalyzeRule.getString(..., isUrl=true)` 对默认 DOM 规则调用 `AnalyzeByJSoup.getString0`：同一列表项有多个匹配链接时只取首个 URL，而非合并。分页规则若精确返回已知书籍/目录 URL，本工程作为安全扩展停止并告警 `PAGINATION_TO_CATALOG`；这与官方主要使用“下一章 URL”作边界的行为不能混同。
+官方入口：[AnalyzeRule](../../legado/app/src/main/java/io/legado/app/model/analyzeRule/AnalyzeRule.kt)、[AnalyzeByJSoup](../../legado/app/src/main/java/io/legado/app/model/analyzeRule/AnalyzeByJSoup.kt)、[AnalyzeByJSonPath](../../legado/app/src/main/java/io/legado/app/model/analyzeRule/AnalyzeByJSonPath.kt)。历史正反例集中在[规则与 JS 探针](history/README.md#规则与-js-宿主)。
 
-[`java.post` 探针](java-post-redirect-probe.md)按官方 `JsExtensions.post` 的 `followRedirects(false)`、原始 body/头和响应 `header("Location")` 补受控子集。该返回值不能复用只给正文字符串的 `java.ajax`；普通书源请求继续按原策略跟跳转。真实起舞中文被 TLS 阻断，只有合成规则和本地 302 证明此子集，不能宣称官方完整 `Connection.Response` 宿主已实现。
+## 请求、阶段控制与分页
 
-[经致文学目录探针](dom-select-vip-probe.md)以真实 `ruleToc.isVip` 补 `Element.select → Elements.hasClass` 的受控 JS 视图，并在 JVM/Android 与公开目录的 12 链接、9 个 `isvip` 标签对照。节点/集合可用方法仍是白名单，不开放 Java 类反射；此目录标记不能推断付费正文可取。
+- 请求模板展开 JS、`{{key}}`/`{{page}}` 和页码候选，再处理相对 URL、字符集与后附 JSON 选项。URL 选项允许逗号周围空白，`method/body/headers/charset/webView/timeout/followRedirects` 必须影响最终请求；`timeout` 为毫秒。整数模板值不附 `.0`。
+- 查询值在展开后统一按 `charset` 编码，保留已有百分号查询编码；显式字符集表单与未指定时的已编码检测分别验证。乱码先查响应头、字节与页面声明，不对所有源强制相同编码。
+- URL 型源 ID 的 `#` 标签可以带中文或空格，不以严格 URI 校验破坏相对请求；名称型稳定 ID 也不能冒充可请求地址。带 `,{URL选项}` 的章节链接只对路径解析相对地址，保留选项。
+- `bookUrlPattern` 完整匹配响应最终 URL，可使搜索直接走详情；未配置且列表为空时有详情回退，配置但未匹配时不回退。`ruleBookInfo.init` 的字符串/对象预处理和可选字段逐项失败分别验收。
+- `nextTocUrl` 是目录分页；`nextContentUrl` 是同章分页，调用内容接口时传入已知下一章 URL，命中它即停止。正文合并后再执行 `replaceRegex`。本工程额外将精确返回书籍/目录 URL 的分页停止并告警 `PAGINATION_TO_CATALOG`，此安全扩展不冒称官方等价。
+- `isVolume`、`isVip`、`isPay` 独立求值与存储；不能由标记推断付费正文可取，或将 `isPay` 简化成统一收费判断。
 
-[`isPay` 探针](is-pay-marker-probe.md)按官方 `BookChapterList` 将 `isVip`、`isPay` 分开执行和存储。晋江规则对 `point=0` 返回 `isPay=true`，所以 `isPay` 不能简化成“收费章节”；合成两项目录跨 JVM/Android 验证了标记独立性，公开 API 只证明字段分布，原源含 Cookie/购买分支而尚未跑通。
+官方入口：[AnalyzeUrl](../../legado/app/src/main/java/io/legado/app/model/analyzeRule/AnalyzeUrl.kt)、[BookChapterList](../../legado/app/src/main/java/io/legado/app/model/webBook/BookChapterList.kt)、[BookContent](../../legado/app/src/main/java/io/legado/app/model/webBook/BookContent.kt)。
 
-## 可执行测试矩阵
+## JS 宿主、登录态与浏览器
 
-| 层级 | 样本/夹具 | 通过条件 | 当前状态 |
-| --- | --- | --- | --- |
-| 规则单元 | 本地构造 HTML/JSON、ES6、模板、`||`、`&&/%%`、`<js>`、`###` | 精确断言请求、节点、字符串和缺省行为；无网络 | 已覆盖复合规则的基础子集，复杂 CSS/混合规则与宿主生命周期待补 |
-| 本地端到端 | `test-fixtures/http/` | 导入→搜索→详情→目录→正文→TXT/EPUB，可在模拟器复现 | 已通过文本基础流程 |
-| 真实源逐阶段 | `source-catalog` 早期 11 源快照 | 分别记录搜索/详情/目录/正文/登录/WebView/网络状态，不能把 403、超时算“0 命中” | 轻小说机翻已完成整书；rezero 完成到首章；其余有规则或网络缺口 |
-| 跨站兼容 | 主集合 11 源及仅作诊断的补充来源 | 按不同站点和机制记录请求、响应语义、搜索、详情、目录、单章的首个失败阶段；每类修复有离线回归及真实复测，不把一个站点的多本书算作广度 | 当前首要工作；详见[跨站诊断](cross-source-compatibility.md) |
-| 批量整书 | `downloads/batch/books/<bookUrl-SHA256>/` | 若执行 100 本压力验收，须为不同书 URL，逐本核对完整章节、非空正文、TXT 字节数与 SHA-256；失败或部分下载不计数 | 已停止增加下载数量；此前 52 本有效文件只代表同一简单源的压力样本 |
+- Rhino 规则脚本、`java.*` 受控宿主、`mainJs` 和浏览器页面脚本是不同执行环境。未知方法给出字段、阶段和方法名；不开放任意 Java 类、反射或文件 API。DOM/Jsoup 只暴露已验证白名单。
+- 规则里的 `java.post` 与 `java.head` 保留各自不自动跟随跳转的响应视图，不能复用仅返回正文的 `java.ajax`。超时重载、响应头和 Cookie 断言实际请求/返回，不只检查方法存在。
+- 源变量、登录头与 Cookie 按模型和源身份隔离。默认头、保存的登录头、显式请求头按顺序覆盖；登录头默认只隐式发往同 origin，跳转逐跳限制敏感头。阶段和脚本子请求共享源限速及取消/超时策略。
+- Rhino 嵌套执行维持同一截止时间与类白名单。`timeFormatUTC` 的时区偏移按毫秒；繁简转换词组例外和转换库资源需随核心打包。
+- `WebContentTransport` 承载网页正文脚本和 `sourceRegex` 资源捕获，HTTP-only 明确拒绝。浏览器 URL 正则为有预算的 RE2/J 子集，反向引用、环视给字段诊断；普通规则 Java 正则不因此获得期限保证。Android ICU 会把 CharSequence 转 String，不能用 JVM 字符访问包装证明 Android 时间上限。
 
-每新增一种语法或宿主方法：先取一个最小真实规则/页面（允许提交时用合成等价夹具），对照官方实现确定预期，补 Java 单测，再重跑对应真实源阶段。真实测试记录必须固定书源快照、时间、客户端环境、HTTP 状态与字段阶段。不要提交账号、Cookie、原始正文或第三方完整书源；本地下载目录均被 Git 忽略。
+官方入口：[JsExtensions](../../legado/app/src/main/java/io/legado/app/help/JsExtensions.kt)。RSS 页面的来源/主 frame/token 及旧 provider 降级见[RSS 边界](rss-compatibility.md)。
 
-## 2026-10-22 扩展契约（离线验收，最终统一检查待完成）
+## 回归与声明
 
-- 规则模式前缀大小写不敏感，但 JSON 属性名与选择器内容保持原样；列表后置 `##/###` 对每项执行，保留项目内换行；DOM→JS 分段保留节点类型。
-- URL 选项允许逗号前后空白；查询值在 JS 展开后统一按 `charset` 编码，保留已有百分号查询编码。显式字符集的表单编码与未指定时的已编码检测分别处理。`timeout` 为毫秒，`followRedirects` 影响真实请求，`header` 支持受控 JS 返回 JSON 字符串。
-- 受控宿主新增源变量和登录头持久化、Cookie 基础接口、GET/POST/HEAD 超时重载与响应视图、`timeFormatUTC` 的毫秒时区偏移。源状态按模型和 ID 隔离；登录头默认只发送到同源地址，跳转逐跳限制敏感头。`concurrentRate` 与调用预算同时作用于阶段及脚本子请求。仍不开放 Java 类反射、任意文件 API 或交互式验证码回调。
-- RSS 使用独立模型/仓储；混合导入先解析 BookSource/RssSource，再一次提交双方快照。普通 `SourceImporter` 仍只导入 BookSource；RSS 应经 `RssImporter` 或应用的混合导入协调器进入，不能以删除模型校验来“支持 RSS”。
-- RSS 的标准 `item`、自定义列表、分类/搜索、`PAGE`、正文分页及 HTML/浏览器/图片/视频阅读目标分别验收。自定义列表过滤空标题；默认 XML 分支保留官方行为，不补造 Atom 支持。XML 拒绝 DTD 与外部实体；Android Expat 的非标准 feature 支持不同，必须以声明/词法回调和实体 resolver 保证拒绝，不能以关闭安全校验修复平台兼容。
-- 阅读优先非空摘要，其次 `ruleContent`，否则直开 URL；`singleUrl` 走网页。一个正文下一页连续跟进；多个下一页按列表顺序各抓一次，不递归扩展；分页同时要求源和文章均为网页类型。循环、超过 50 页或累计正文超过字符预算时明确失败。重定向后的最终地址用于相对字段和正文分页链接解析。
-- Android RSS 网页层实现样式、起始页、前后注入、导航钩子、资源过滤及有限原生桥；桥按来源、主框架、页面代次和令牌校验。旧 WebView 或明文网页缺少安全桥前提时报告部分支持。`addBook`、任意原生同步回调、POST 导航重放及复杂网页生命周期仍不等价，不能写成完整 Legado WebView 兼容。
-- 安全扩展：浏览器 `sourceRegex` 和 RSS 资源名单采用 RE2/J 线性语法；反向引用/环视等不支持特性须字段诊断，不能静默退回 Android ICU。名单仍按字面前缀或完整匹配、黑名单优先处理；不支持的正则仅保留字面前缀并告警。普通规则正则保持 Java 语义，不能据此承诺其执行期限。
+新增语义应固定官方路径及最小正反例，断言请求、字段和状态隔离；必要时补本地 HTTP、Android 或官方差分。可重复命令和最近执行范围见[验证指南](verification.md)，源 JSON 交付与错误归因见[skill 验证参考](../skills/legado-source/references/verification.md)。
 
-验收位置：`RuleCompatibilityRegressionTest`、`SourceStateRuntimeTest`、`RssEngineTest`、`SourceImportCoordinatorTest`、`RssWebPolicyTest` 和 `LinearRegexTest`。本轮不增加真实站点通过数量；具体执行状态见[实测记录](live-source-tests.md)。
-
-## 当前优先级与不等价点
-
-- 优先完善官方模式识别与 URL 选项；再扩展 JS 宿主、变量作用域、Cookie/登录和编码。顶层 `&&/||/%%` 已补合并基础路径，并避免把 JSONPath 过滤器内部的同名运算符拆开，但混合模式未穷尽。正文 `replaceRegex` 已补“合并后执行”与默认不跨行的基础路径及 `<js>` 后接 `##` 测试；未证明所有真实字体映射正确。
-- Android WebView 要在模拟器/设备上独立验证；JVM 探针不能代替。遇到网站登录、403、CF、付费或频率限制时记录边界，不绕过访问控制。
-- 正文分页调用应传入目录里已知的下一章 URL；`nextContentUrl` 若指向该 URL 就停止本章合并。这与官方 `BookContent.analyzeContent` 的边界处理一致。只调用不带下一章参数的兼容接口时，无法保证这一边界。
-- `BookInfoRule.init` 已有 JS 字符串与 JSON 对象的 Java 回归；`TocRule.isVolume` 已由 rezero 公开目录对照验证、`isVip` 已由黑岩公开目录对照验证，但再漫画仍被上游 URL 失配阻断，猫眼则停在详情业务错误。`isPay` 模型与规则基础子集已补，真实晋江源仍未到目录；`bookUrlPattern` 的最终 URL 完整匹配和空列表回退已有[合成回归](book-url-pattern-probe.md)，但缺实站直达正对照，内容净化仍未完整实现。不能把一个站点的合成或目录正对照扩大为所有站点通过。
-- 当前优先目标是尽量发现跨站规则兼容问题：按**独立站点 × 不同规则机制 × 最深通过阶段**衡量覆盖。目录条目数还要区分 URL 占位；[有度样本](additional-cross-site-probe.md#有度目录的107-章含义)的 107 个去重记录含 1 个 `javascript:`，不能直接称 107 个可抓取章节。此前提出的 100 本量化验收可在兼容缺口收敛后作为压力测试，不能替代跨站验证；有未覆盖项时继续标记为未完成。
+真实站点证据保留在[历史索引](history/README.md)，不得从单站或下载数量外推整体兼容。新增能力、已知限制和优先级分别维护在[能力矩阵](compatibility.md)与[后续工作](remaining-work.md)，本页不重复维护测试数量或实站可用率。

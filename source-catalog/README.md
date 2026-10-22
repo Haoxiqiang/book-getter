@@ -17,4 +17,4 @@
 
 已下载文件位于 `snapshots/<CURRENT>/`，`raw/` 保留上游原文；快照 ID、原始文件数及去重书源数以本机 `CURRENT`、`index.json` 和 `listCatalog` 输出为准。新检出没有本机快照时，先运行 `checkCatalogConfig` 校验仓库内订阅配置，再按需手动运行 `updateCatalog`。更新时旧快照保留，可将 `CURRENT` 改回旧快照名进行回滚。去重键是 `bookSourceUrl`：主机名小写、去默认端口、去 URL 片段和路径末尾斜杠；不会擅自合并 `www` 与非 `www` 或 HTTP 与 HTTPS。重复项按 `feeds.json` 顺序保留第一条，并在索引中记录其他来源。
 
-目录快照通过 CLI 手动更新；App 的“URL 导入”会持久化 URL，之后可点“更新订阅”重新下载。真实书源能导入不等于规则、登录和网站始终可用。在线搜索诊断见 [实测记录](../docs/live-source-tests.md)。
+目录快照通过 CLI 手动更新；App 的“URL 导入”会持久化 URL，之后可点“更新订阅”重新下载。真实书源能导入不等于规则、登录和网站始终可用。在线搜索诊断见 [实测记录](../docs/history/live-source-tests.md)。

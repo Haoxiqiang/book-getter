@@ -35,28 +35,7 @@ import org.bookgetter.core.Models.FetchResponse;
 import org.bookgetter.core.Transport;
 
 /** A source-scoped RSS browser. The Activity owns app actions; this class owns browser isolation. */
-public final class RssWebViewController implements AutoCloseable {
-    public record Config(String sourceId, String sourceUrl, Map<String, String> headers,
-                         boolean enableJs, boolean cacheFirst, String preloadJs, String injectJs,
-                         String startHtml, String startJs, String style, String startStyle,
-                         String contentWhitelist, String contentBlacklist, Map<String, String> variables) {
-        public Config {
-            headers = headers == null ? Map.of() : Map.copyOf(headers);
-            variables = variables == null ? Map.of() : Map.copyOf(variables);
-            if (sourceId == null || sourceId.isBlank()) throw new IllegalArgumentException("RSS source identity is required");
-        }
-    }
-    public interface Host {
-        /** Runs on the ordered worker. UI actions must be posted to the Activity's main thread. */
-        String dispatch(String method, List<String> arguments) throws Exception;
-        /** Runs on the same worker after all prior put messages. True consumes the navigation. */
-        default boolean shouldOverride(String url) throws Exception { return false; }
-        /** Prepares a normal browser GET without performing an extra fetch. Runs on the ordered worker. */
-        default FetchRequest prepare(FetchRequest request) throws Exception { return request; }
-        /** Runs on the main thread. */
-        void onDiagnostic(String field, String code, String message);
-    }
-
+public final class RssWebViewController implements org.bookgetter.core.RssBrowserSession {
     private static final String BRIDGE = "__bookGetterRssNative";
     private static final int MAX_MESSAGE_CHARS = 65_536;
     private static final Set<String> METHODS = Set.of("searchBook", "open", "showPhoto", "put", "get");
@@ -169,17 +148,17 @@ public final class RssWebViewController implements AutoCloseable {
     }
 
     /** Must be called on the main thread. User navigations and prior variable writes remain ordered. */
-    public void loadUrl(String url) {
+    @Override public void loadUrl(String url) {
         requireMainThread();
         navigate(url, true);
     }
 
-    public void loadStartPage() {
+    @Override public void loadStartPage() {
         loadHtml(config.startHtml() == null ? "" : config.startHtml(), localOrigin + "/", true);
     }
 
     /** App-generated or extracted HTML is isolated on a per-source synthetic HTTPS origin. */
-    public void loadHtml(String html, String baseUrl, boolean startPage) {
+    @Override public void loadHtml(String html, String baseUrl, boolean startPage) {
         requireMainThread();
         if (closed.get()) return;
         long next = beginNavigation();

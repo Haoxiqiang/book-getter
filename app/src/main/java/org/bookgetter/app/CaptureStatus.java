@@ -1,5 +1,7 @@
 package org.bookgetter.app;
 
+import org.bookgetter.business.CaptureRunner;
+
 /** User-facing result of a chapter capture, including details behind the status label. */
 record CaptureStatus(String title, String message, String details) {
     static CaptureStatus from(CaptureRunner.Result result, int total) {

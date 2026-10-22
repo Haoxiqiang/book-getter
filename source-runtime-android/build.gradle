@@ -1,4 +1,4 @@
-plugins { id 'com.android.library' }
+plugins { alias(libs.plugins.android.library) }
 android {
     namespace = 'org.bookgetter.runtime'
     compileSdk = 36
@@ -11,11 +11,11 @@ android {
 }
 dependencies {
     api project(':source-core')
-    implementation 'com.squareup.okhttp3:okhttp:3.14.9'
-    implementation 'androidx.webkit:webkit:1.15.0'
-    implementation 'org.jsoup:jsoup:1.23.2'
-    implementation 'com.google.re2j:re2j:1.8'
-    testImplementation 'junit:junit:4.13.2'
-    testImplementation 'com.squareup.okhttp3:mockwebserver:3.14.9'
-    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
+    implementation libs.okhttp
+    implementation libs.webkit
+    implementation libs.jsoup
+    implementation libs.re2j
+    testImplementation libs.junit4
+    testImplementation libs.mockwebserver
+    coreLibraryDesugaring libs.desugar
 }

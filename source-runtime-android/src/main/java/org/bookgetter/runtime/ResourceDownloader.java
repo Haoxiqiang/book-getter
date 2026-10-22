@@ -30,7 +30,7 @@ import org.bookgetter.core.MemorySourceStateStore;
 import org.bookgetter.core.Models.FetchRequest;
 
 /** Explicit user-triggered binary download, using the same login cookies as source fetching. */
-public final class ResourceDownloader {
+public final class ResourceDownloader implements org.bookgetter.core.ResourceDownloadService {
     private static final int MAX_REDIRECTS = 10;
     static final long MAX_STAGED_IMAGE_BYTES = 512L * 1024 * 1024;
     private static final long MIN_FREE_BYTES = 32L * 1024 * 1024;
@@ -68,7 +68,7 @@ public final class ResourceDownloader {
         this.temporaryDirectory = temporaryDirectory;
         this.maxStagedBytes = maxStagedBytes;
     }
-    public void download(Source source, Resource resource, OutputStream output) throws IOException {
+    @Override public void download(Source source, Resource resource, OutputStream output) throws IOException {
         transfer(source, resource, extension -> output, false);
     }
     private String transfer(Source source, Resource resource, Destination destination,
@@ -145,7 +145,7 @@ public final class ResourceDownloader {
         }
         return null;
     }
-    public void downloadZip(Source source, java.util.List<Resource> resources, OutputStream output) throws IOException {
+    @Override public void downloadZip(Source source, java.util.List<Resource> resources, OutputStream output) throws IOException {
         if (source.kind() != Kind.IMAGE) throw new IOException("Image ZIP requires an image source");
         if (!temporaryDirectory.isDirectory() && !temporaryDirectory.mkdirs())
             throw new IOException("Cannot create image staging directory");

@@ -1,5 +1,12 @@
 package org.bookgetter.app;
 
+import org.bookgetter.runtime.AndroidSourceStorage;
+import org.bookgetter.business.MixedSourceStore;
+
+import org.bookgetter.business.RssStore;
+import org.bookgetter.business.RssReadCache;
+import org.bookgetter.business.RssRequestPolicy;
+
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
@@ -30,7 +37,7 @@ public final class RssActivity extends Activity {
     private TextView status;
     private ListView list;
     private LinearLayout reader;
-    private RssWebViewController browser;
+    private RssBrowserSession browser;
     private List<RssSource> sources = List.of();
     private List<Article> articles = List.of();
     private RssReadCache readCache;
@@ -47,7 +54,7 @@ public final class RssActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        store = new RssStore(this);
+        store = new RssStore(new MixedSourceStore(AndroidSourceStorage.mixedStorage(this)).rssStorage());
         selections = new RssSelectionStore(getFilesDir());
         states = new FileSourceStateStore(new File(getFilesDir(), "source-state"));
         transport = new AndroidTransport(this);
@@ -184,7 +191,7 @@ public final class RssActivity extends Activity {
                 target = engine().open(source, article);
                 if (tasks.isCurrent()) readCache.putIfUnchanged(ticket, source, article, states, target);
             }
-            RssWebViewController.Config config = config(source);
+            RssBrowserSession.Config config = config(source);
             ReadTarget ready = target;
             ui(() -> { activeSource = source; present(source, ready, config); });
         });
@@ -196,7 +203,7 @@ public final class RssActivity extends Activity {
             if (html != null && html.startsWith("@js:")) html = Objects.toString(scripts.evaluate(html.substring(4), Map.of(), source.executionSource()), "");
             else if (html != null && html.startsWith("<js>") && html.endsWith("</js>"))
                 html = Objects.toString(scripts.evaluate(html.substring(4, html.length() - 5), Map.of(), source.executionSource()), "");
-            RssWebViewController.Config config = config(source);
+            RssBrowserSession.Config config = config(source);
             String start = html;
             ui(() -> {
                 activeSource = source; prepareBrowser(source, config);
@@ -204,14 +211,14 @@ public final class RssActivity extends Activity {
             });
         });
     }
-    private RssWebViewController.Config config(RssSource source) {
+    private RssBrowserSession.Config config(RssSource source) {
         FetchRequest request = new RequestPlanner(scripts).plan(source.id(), source.executionSource(), "", 1, source.id());
-        return new RssWebViewController.Config(source.id(), source.id(), request.headers(), source.flag("enableJs", true),
+        return new RssBrowserSession.Config(source.id(), source.id(), request.headers(), source.flag("enableJs", true),
                 source.flag("cacheFirst", false), source.string("preloadJs"), source.string("injectJs"), source.string("startHtml"),
                 source.string("startJs"), source.string("style"), source.string("startStyle"), source.string("contentWhitelist"),
                 source.string("contentBlacklist"), states.snapshot(SourcePolicy.of(source.executionSource()).stateKey()));
     }
-    private void present(RssSource source, ReadTarget target, RssWebViewController.Config config) {
+    private void present(RssSource source, ReadTarget target, RssBrowserSession.Config config) {
         prepareBrowser(source, config);
         if (target instanceof HtmlContent html) browser.loadHtml(html.html(), source.flag("loadWithBaseUrl", true) ? html.baseUrl() : null, false);
         else if (target instanceof BrowserPage page) browser.loadUrl(page.url());
@@ -223,11 +230,11 @@ public final class RssActivity extends Activity {
         } else if (target instanceof Video video) browser.loadUrl(video.url());
         report("RSS 阅读：" + source.name());
     }
-    private void prepareBrowser(RssSource source, RssWebViewController.Config config) {
+    private void prepareBrowser(RssSource source, RssBrowserSession.Config config) {
         closeBrowser(); list.setVisibility(View.GONE); reader.setVisibility(View.VISIBLE);
         WebView view = new WebView(this); reader.addView(view, new LinearLayout.LayoutParams(-1, -1));
         long owner = browserOwner;
-        browser = new RssWebViewController(view, config, new RssWebViewController.Host() {
+        browser = new RssWebViewController(view, config, new RssBrowserSession.Host() {
             @Override public String dispatch(String method, List<String> arguments) {
                 return bridge(source, method, arguments, owner);
             }

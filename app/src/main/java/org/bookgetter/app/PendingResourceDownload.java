@@ -1,5 +1,7 @@
 package org.bookgetter.app;
 
+import org.bookgetter.business.ChapterStore;
+
 import com.google.gson.Gson;
 import java.util.List;
 import org.bookgetter.core.Models.Resource;
